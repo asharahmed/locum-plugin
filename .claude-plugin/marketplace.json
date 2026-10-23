@@ -1,0 +1,5 @@
+{
+  "name": "ashar-local",
+  "owner": { "name": "Ashar Ahmed" },
+  "plugins": [{ "name": "openrouter-agents", "source": "./" }]
+}

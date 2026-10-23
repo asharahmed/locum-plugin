@@ -1,0 +1,24 @@
+{
+  "name": "openrouter-agents",
+  "version": "0.6.4",
+  "description": "Native Agent-tool subagent types (deepseek, kimi, glm) whose model requests go to OpenRouter",
+  "license": "MIT",
+  "userConfig": {
+    "lowBalanceUsd": {
+      "type": "number",
+      "title": "Low-balance warning (USD)",
+      "description": "Show a notice at session start when the OpenRouter balance or key limit is below this. 0 turns it off.",
+      "default": 5
+    },
+    "autoMode": {
+      "type": "string",
+      "title": "Auto mode",
+      "description": "refuse: these agents don't start in auto mode. allow: they run with their tool calls and reports unreviewed by auto mode's safety check (deny rules still apply).",
+      "options": [
+        "refuse",
+        "allow"
+      ],
+      "default": "refuse"
+    }
+  }
+}

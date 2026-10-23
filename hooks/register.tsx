@@ -1,7 +1,7 @@
 import type { Register, TurnStepResult, TurnStepToolUse, TurnStopReason, TurnUsage } from 'claude-code'
 import type { AgentRun } from '../types'
 import type { AgentDef } from './agents'
-import { FALLBACK_FOR_FALLBACK, agentName, readSettings } from './agents'
+import { agentName, fallbackModelFor, readSettings } from './agents'
 import { FILE_TOOLS, REFUSAL, normalizePath, refusedPathIn } from './guard'
 import {
   AUTO_REPORT_RULE,
@@ -41,7 +41,7 @@ export const register: Register = (on, options) => {
 
   // The model a failing step moves to: never the agent's own, never a Claude model
   const fallbackFor = (agent: AgentDef): AgentDef => {
-    const model = settings.fallbackModel === agent.model ? FALLBACK_FOR_FALLBACK : settings.fallbackModel
+    const model = fallbackModelFor(agent.model, settings.fallbackModel)
     return { ...agent, model, label: model, vision: false, providers: undefined }
   }
 
@@ -95,6 +95,7 @@ export const register: Register = (on, options) => {
           if (!m) missing.push(`${name} (${a.model})`)
           else if (m.architecture?.input_modalities) a.vision = m.architecture.input_modalities.includes('image')
         }
+        if (!listed.has(settings.fallbackModel)) missing.push(`fallbackModel (${settings.fallbackModel})`)
         if (missing.length) $.ui.toast(`OpenRouter has no model for: ${missing.join(', ')}. Check /plugin configure.`)
       }
       if (!(settings.lowBalanceUsd > 0)) return
@@ -406,8 +407,12 @@ export const register: Register = (on, options) => {
         (keyLeft !== undefined ? `, ${usd(keyLeft)} left on this key's limit` : '') +
         `. Top up at ${TOP_UP}`
     }
+    const version = await $.fs
+      .read('.claude-plugin/plugin.json')
+      .then(t => String((JSON.parse(String(t)) as { version?: unknown }).version ?? ''))
+      .catch(() => '')
     const lines = [
-      `OpenRouter subagents (${$.plugin.name})`,
+      `OpenRouter subagents${version ? ` ${version}` : ''}`,
       money,
       `This session: ${runs.length} run${runs.length === 1 ? '' : 's'}, ${usd(spent)} spent. Caps: ${settings.maxRunUsd > 0 ? usd(settings.maxRunUsd) : 'none'} per run, ${settings.maxSessionUsd > 0 ? usd(settings.maxSessionUsd) : 'none'} per session.`,
       `Settings: privacy ${settings.privacy}, auto mode ${settings.autoMode}, fallback model ${settings.fallbackModel}.`,

@@ -53,15 +53,24 @@ export async function sessionUsd($: EngineInterface) {
   return Object.values(await read($, runsAtom)).reduce((sum, r) => sum + r.usd, 0)
 }
 
+// Agents seen not to be ours, so their every step and tool check skips the
+// agent list (a reload clears it, which only costs one lookup each)
+const notOurs = new Set<string>()
+
 // The run of one of our agents, created on first sight for one spawned before
 // this code loaded (its type still names it); undefined for anyone else's agent
 export async function runOf($: EngineInterface, agents: Record<string, AgentDef>, agentId: string) {
+  if (notOurs.has(agentId)) return undefined
   const run = await getRun($, agentId)
   if (run) return run
   const info = (await $.agent.list()).find(a => a.id === agentId)
   const name = agentName(info?.type, $.plugin.name)
   const agent = agents[name]
-  if (!agent) return undefined
+  // An agent the list doesn't know yet may still be starting; only a known one is ruled out
+  if (!agent) {
+    if (info) notOurs.add(agentId)
+    return undefined
+  }
   const created = newRun(name, agent.model, false, await $.clock.now())
   await update($, runsAtom, runs => (runs[agentId] ? runs : { ...runs, [agentId]: created }))
   return (await getRun($, agentId)) ?? created

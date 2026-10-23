@@ -180,9 +180,11 @@ test('/openrouter shows the balance, the agents and the runs', async ($, on) => 
       text: e.url.endsWith('/credits') ? '{"data":{"total_credits":10,"total_usage":7.5}}' : '{"data":{"limit_remaining":4}}',
     },
   }))
+  on('fs.read', () => ({ value: '{"version":"9.9.9"}' }))
   await step($)
   const out: any = await $.command.run({ command: 'openrouter', args: '' } as never)
   const shown = String(out.text ?? out.value?.text ?? '')
+  expect(shown).toMatch(/^OpenRouter subagents 9\.9\.9$/m)
   expect(shown).toMatch(/\$2\.50 on the account/)
   expect(shown).toMatch(/cheap +deepseek\/deepseek-v4-flash-0731/)
   expect(shown).toMatch(/kimi +moonshotai\/kimi-k3 · effort low/)
@@ -204,4 +206,36 @@ test('in auto mode the report reaches the completion notice, labelled', { option
   expect(delivered).toMatch(/Auto mode did not review this report/)
   expect(delivered).toMatch(/All done: 3 files checked\./)
   expect(delivered).toMatch(/Tool calls this run: none\./)
+})
+
+test('a fallback setting equal to the agent\'s own model moves on to the next model', { options: { fallbackModel: 'deepseek/deepseek-v4.1-flash-1017' } }, async ($, on) => {
+  const requests = engine(on, [RETRYABLE, RETRYABLE, RETRYABLE, sse([start(), ...text(0, 'ok'), ...end('end_turn')])], 'openrouter-agents:deepseek')
+  const pending = step($)
+  await requests.clock.settle()
+  await requests.clock.advance(1000)
+  await requests.clock.settle()
+  await requests.clock.advance(2000)
+  await pending
+  expect(JSON.parse(requests[0]!).model).toBe('deepseek/deepseek-v4.1-flash-1017')
+  expect(JSON.parse(requests[3]!).model).toBe('deepseek/deepseek-v4-flash-0731')
+})
+
+test('another plugin\'s subagent is looked up once, then passed through', async ($, on) => {
+  mock.clock(on)
+  let lookups = 0
+  on('agent.list', () => {
+    lookups++
+    return { value: [{ id: 'native1', type: 'general-purpose', description: 'x', status: 'running' }] }
+  })
+  let beneath = 0
+  on('turn.step', async function* (_$: unknown, e: { turnId: string; index: number }) {
+    beneath++
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+  for (const index of [0, 1, 2]) {
+    const s = $.turn.step({ turnId: 't', index, model: 'claude-opus-5-5', messageCount: 1, agentId: 'native1' } as never)
+    for (let r = await s.next(); !r.done; r = await s.next()) {}
+  }
+  expect(beneath).toBe(3)
+  expect(lookups).toBe(1)
 })

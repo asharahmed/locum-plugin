@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1
+
+- Another plugin's or a built-in subagent is looked up once, then passed straight through (each of its steps and tool checks had listed every agent).
+- A `fallbackModel` equal to the failing agent's own model now moves on to the next fallback instead of retrying the same model.
+- The fallback model is checked against OpenRouter's list at session start, like the agents' models.
+- `/openrouter` names the plugin's version.
+
 ## 0.7.0
 
 - Split the hooks module into `agents.ts`, `openrouter.ts`, `messages.ts`, `guard.ts` and `state.ts`; `register.tsx` only wires hooks.

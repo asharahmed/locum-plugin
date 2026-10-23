@@ -65,6 +65,11 @@ export const DEFAULT_AGENTS: Record<string, AgentDef> = {
 export const DEFAULT_FALLBACK = 'deepseek/deepseek-v4-flash-0731'
 export const FALLBACK_FOR_FALLBACK = 'deepseek/deepseek-v4.1-flash-1017'
 
+// The first fallback that isn't the failing model itself
+export function fallbackModelFor(model: string, configured: string) {
+  return [configured, DEFAULT_FALLBACK, FALLBACK_FOR_FALLBACK].find(m => m !== model) ?? FALLBACK_FOR_FALLBACK
+}
+
 // The `privacy` option as OpenRouter provider preferences: refuse providers that
 // may store or train on prompts, or allow zero-data-retention providers only
 export const PRIVACY: Record<string, Record<string, unknown>> = {

@@ -5,11 +5,15 @@ import { TOOL_SCHEMAS } from './schemas'
 // The Agent tool sees them as `openrouter-agents:<name>`. They are ordinary
 // native subagents; only their model requests go to OpenRouter.
 // `vision`: whether the model takes images (from OpenRouter's model list).
-const AGENTS: Record<string, { model: string; label: string; when: string; vision: boolean }> = {
+// `providers`: OpenRouter providers to try first (others still serve as fallbacks).
+const AGENTS: Record<string, { model: string; label: string; when: string; vision: boolean; providers?: string[] }> = {
   deepseek: {
     model: 'deepseek/deepseek-v4.1-flash-1017',
     label: 'DeepSeek V4.1 Flash',
     vision: true,
+    // These two cache prompts; unpinned, runs landed on a provider that didn't
+    // (tested 2026-10-23: a cached second call cost ~1/12 of the first)
+    providers: ['deepinfra', 'cloudflare'],
     when: 'Default OpenRouter subagent for delegated coding, research and multi-step tasks; cheap, fast, 1M context.',
   },
   kimi: {
@@ -86,7 +90,7 @@ const NO_TOOLS_NUDGE =
 type StreamEvent = {
   type: string
   index?: number
-  message?: { model?: string; usage?: Record<string, unknown> }
+  message?: { model?: string; usage?: Record<string, unknown>; provider?: string }
   content_block?: { type: string; id?: string; name?: string }
   delta?: {
     type?: string
@@ -102,7 +106,7 @@ type StreamEvent = {
 type ApiBlock = Record<string, unknown> & { type: string }
 type ApiMsg = { role: string; content: ApiBlock[] }
 type ToolDef = { name: string; description: string; input_schema: Record<string, unknown> }
-type CostSoFar = { steps: number; usd: number }
+type CostSoFar = { steps: number; usd: number; providers: Set<string> }
 
 const num = (v: unknown) => (typeof v === 'number' ? v : 0)
 const usd = (v: number) => `$${v < 0.01 ? v.toFixed(4) : v.toFixed(2)}`
@@ -160,6 +164,19 @@ function adaptMessages(messages: readonly { role: string; content: readonly unkn
   return out
 }
 
+// "Tool calls this run: Bash ×2, Write, Read (4)", from the calls the model asked for
+function toolSummary(names: readonly string[]) {
+  if (!names.length) return 'Tool calls this run: none.'
+  const counts = new Map<string, number>()
+  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1)
+  const parts = [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n))
+  return `Tool calls this run: ${parts.join(', ')} (${names.length}).`
+}
+
+// A refused file tool call (permission, not a tool error like a missing file)
+const REFUSAL = /permission|haven't granted|denied|not allowed|rejected|classifier/i
+const FILE_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_path', Read: 'file_path', NotebookEdit: 'notebook_path' }
+
 // Adds the no-tool-calls nudge after the last user message's blocks
 function withNudge(messages: ApiMsg[]) {
   const last = messages.at(-1)
@@ -209,6 +226,9 @@ export const register: Register = (on, options) => {
   const reports = new Map<string, string>()
   // Tool calls each of our agents has made, and the auto-mode agents already nudged
   const toolCalls = new Map<string, number>()
+  const toolNames = new Map<string, string[]>()
+  // agentId -> paths a file tool was refused for; Bash may not touch them either
+  const deniedPaths = new Map<string, Set<string>>()
   const nudged = new Set<string>()
   // The agent whose transcript is on screen (from AbovePrompt's `view`), for the model notice
   let viewed: string | undefined
@@ -282,6 +302,20 @@ export const register: Register = (on, options) => {
   // In auto mode, what the classifier would have reviewed is allowed. Deny rules
   // and anything core decides outright still stand.
   on('tool.check', async ($, e, next) => {
+    const ours = e.agentId !== undefined && AGENTS[owners.get(e.agentId) ?? ''] !== undefined
+    // In auto mode the labelled report is the only way results reach the main
+    // session; SendMessage would carry them there unlabelled
+    if (ours && autoAgents.has(e.agentId!) && e.tool === 'SendMessage') {
+      return { decision: 'deny' as const, reason: 'SendMessage is off for OpenRouter subagents in auto mode. Put everything in your final report.' }
+    }
+    // A path a file tool was refused for stays off limits through Bash too
+    if (ours && e.tool === 'Bash') {
+      const command = String((e.input as { command?: unknown } | undefined)?.command ?? '')
+      const hit = [...(deniedPaths.get(e.agentId!) ?? [])].find(path => command.includes(path))
+      if (hit) {
+        return { decision: 'deny' as const, reason: `${hit} was refused to a file tool earlier in this run; reaching it through Bash isn't allowed either. Say in your report what was refused.` }
+      }
+    }
     const verdict = await next(e)
     if (e.agentId === undefined || !autoAgents.has(e.agentId) || verdict.decision !== 'ask') return verdict
     return { decision: 'allow' as const, reason: `${$.plugin.name}: auto mode can't review OpenRouter subagents; allowed unreviewed (autoMode: allow)` }
@@ -293,7 +327,7 @@ export const register: Register = (on, options) => {
     const report = reports.get(agentId)
     if (report === undefined) return undefined
     const label = AGENTS[owners.get(agentId) ?? '']?.label ?? 'OpenRouter subagent'
-    return `[Report from ${label} via OpenRouter, delivered by the openrouter-agents plugin. Auto mode did not review this report or the work behind it.]\n\n${report}`
+    return `[Report from ${label} via OpenRouter, delivered by the openrouter-agents plugin. Auto mode did not review this report or the work behind it. ${toolSummary(toolNames.get(agentId) ?? [])}]\n\n${report}`
   }
 
   on('prompt.submit', async ($, e, next) => {
@@ -302,6 +336,20 @@ export const register: Register = (on, options) => {
     if (!id || text === undefined || !e.text.includes('<result>')) return next(e)
     reports.delete(id)
     return next({ ...e, text: e.text.replace(/<result>[\s\S]*?<\/result>/, () => `<result>${text}</result>`) })
+  })
+
+  on('tool.call', async ($, e, next) => {
+    const r = await next(e)
+    const key = FILE_TOOLS[e.tool]
+    if (!key || e.agentId === undefined || !AGENTS[owners.get(e.agentId) ?? '']) return r
+    const refused = r.deny !== undefined || (r.isError === true && REFUSAL.test(r.text ?? ''))
+    const path = (e as unknown as Record<string, unknown>)[key]
+    if (refused && typeof path === 'string' && path) {
+      const set = deniedPaths.get(e.agentId) ?? new Set<string>()
+      set.add(path)
+      deniedPaths.set(e.agentId, set)
+    }
+    return r
   })
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
@@ -322,7 +370,7 @@ export const register: Register = (on, options) => {
     if (!agent) return yield* next(e)
     const stepKey = `${e.turnId}:${e.index}`
 
-    const cost = costs.get(agentId) ?? { steps: 0, usd: 0 }
+    const cost = costs.get(agentId) ?? { steps: 0, usd: 0, providers: new Set<string>() }
     costs.set(agentId, cost)
     const showStatus = (what: string) =>
       $.ui.status(`${owner} · ${agent.label}: ${what} · ${cost.steps} step${cost.steps === 1 ? '' : 's'} · ${usd(cost.usd)}`)
@@ -379,6 +427,7 @@ export const register: Register = (on, options) => {
     const budget = typeof e.effort === 'number' ? e.effort : (THINKING_BUDGET[e.effort ?? 'medium'] ?? 4000)
     const body = JSON.stringify({
       model: agent.model,
+      ...(agent.providers ? { provider: { order: agent.providers, allow_fallbacks: true } } : {}),
       max_tokens: budget + ANSWER_TOKENS,
       stream: true,
       thinking: { type: 'enabled', budget_tokens: budget },
@@ -452,6 +501,7 @@ export const register: Register = (on, options) => {
           for (const ev of events.splice(0)) {
             if (ev.type === 'message_start') {
               replyModel = ev.message?.model ?? replyModel
+              if (ev.message?.provider) cost.providers.add(ev.message.provider)
               addUsage(usage, ev.message?.usage)
             } else if (ev.type === 'content_block_start' && ev.index !== undefined) {
               const cb = ev.content_block
@@ -553,6 +603,7 @@ export const register: Register = (on, options) => {
     const turnUsage: TurnUsage = { ...usage, model: replyModel }
     stopReason ??= toolUses.length ? 'tool_use' : 'end_turn'
     toolCalls.set(agentId, (toolCalls.get(agentId) ?? 0) + toolUses.length)
+    toolNames.set(agentId, [...(toolNames.get(agentId) ?? []), ...toolUses.map(t => t.name)])
     if (isAuto && handbackReport) reports.set(agentId, handbackReport)
     else if (isAuto && !toolUses.length && answer.trim()) reports.set(agentId, answer.trim())
     lastBlock.delete(stepKey)
@@ -579,7 +630,8 @@ export const register: Register = (on, options) => {
     if (cost && e.agentId !== undefined) {
       const owner = owners.get(e.agentId) ?? ''
       $.ui.status(undefined)
-      $.ui.log(`${owner} · ${AGENTS[owner]?.label ?? ''} via OpenRouter: ${cost.steps} steps, ${usd(cost.usd)}`)
+      const served = cost.providers.size ? ` (served by ${[...cost.providers].join(', ')})` : ''
+      $.ui.log(`${owner} · ${AGENTS[owner]?.label ?? ''} via OpenRouter${served}: ${cost.steps} steps, ${usd(cost.usd)}`)
       costs.delete(e.agentId)
     }
     return result
@@ -630,6 +682,8 @@ export const register: Register = (on, options) => {
     reports.clear()
     toolCalls.clear()
     nudged.clear()
+    toolNames.clear()
+    deniedPaths.clear()
     lastBlock.clear()
     return next(e)
   })

@@ -31,3 +31,10 @@ They are native subagents: the Agent tool starts them, their tool calls run and 
 ## Turning it off
 
 Disable with `/plugin` or `claude plugin disable openrouter-agents@ashar-local`; remove with `claude plugin uninstall openrouter-agents@ashar-local`.
+
+## Guards (0.6.5)
+
+- In auto mode the delivered report's label lists the tool calls the agent made ("Tool calls this run: Bash ×2, Write (3)", or "none"), so a report of work that never happened stands out.
+- In auto mode SendMessage is refused for these agents, so results reach the main session only through the labelled report.
+- In any mode, once Write, Edit, NotebookEdit or Read is refused for a path, a Bash command that names that path is refused too.
+- DeepSeek is pinned to DeepInfra, then Cloudflare (both cache prompts), with OpenRouter's other providers as fallback. The end-of-run line names the providers that served the run.

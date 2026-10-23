@@ -9,6 +9,7 @@ They are native subagents: the Agent tool starts them, their tool calls run and 
 `OPENROUTER_API_KEY` must be in the environment `claude` starts from. Options (in `/plugin configure`):
 - `lowBalanceUsd` (default 5): a low-balance notice appears at session start below this; 0 turns it off.
 - `autoMode` (`refuse` or `allow`, default `refuse`): whether these agents run in auto mode.
+- `privacy` (`zero-retention`, `no-data-collection` or `off`; default `zero-retention`): which OpenRouter providers may serve these agents. These subagents send your files and command output to the provider, so by default only zero-data-retention providers are used. All four default models have such providers (checked 2026-10-23); a model with none fails with a message naming this option.
 - `<agent>Model` and `<agent>Effort` for deepseek, kimi, glm and cheap: the OpenRouter model behind each, and its reasoning effort when the Agent call names none (defaults: medium; kimi low, since its output is expensive). A model other than the default loses DeepSeek's provider pin and is labelled by its ID.
 - `customModel`, `customLabel`, `customEffort`: a free slot. Set `customModel` to any OpenRouter model ID and an `openrouter-agents:custom` agent runs on it.
 

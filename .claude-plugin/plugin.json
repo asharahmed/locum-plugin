@@ -1,6 +1,6 @@
 {
   "name": "openrouter-agents",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "description": "Native Agent-tool subagent types (deepseek, kimi, glm) whose model requests go to OpenRouter",
   "license": "MIT",
   "userConfig": {
@@ -19,6 +19,17 @@
         "allow"
       ],
       "default": "refuse"
+    },
+    "privacy": {
+      "type": "string",
+      "title": "Privacy routing",
+      "description": "Which OpenRouter providers may serve these agents. zero-retention: only providers that keep no prompts. no-data-collection: no providers that store or train on prompts. off: any provider.",
+      "options": [
+        "zero-retention",
+        "no-data-collection",
+        "off"
+      ],
+      "default": "zero-retention"
     },
     "deepseekModel": {
       "type": "string",

@@ -65,6 +65,16 @@ const THINKING_BUDGET: Record<string, number> = { low: 1024, medium: 4000, high:
 // a hook's sleeps count against its 10 s budget
 const RETRY_WAITS_MS = [1000, 2000]
 const CONTEXT_ERROR = /context (length|window)|too many tokens|prompt is too long|maximum context/i
+// OpenRouter's answer when no provider meets the privacy setting
+const POLICY_ERROR = /No endpoints found matching your data policy/i
+
+// The `privacy` option as OpenRouter provider preferences: refuse providers that
+// may store or train on prompts, or allow zero-data-retention providers only
+const PRIVACY: Record<string, Record<string, unknown>> = {
+  off: {},
+  'no-data-collection': { data_collection: 'deny' },
+  'zero-retention': { zdr: true },
+}
 
 // The engine tells every subagent to end its run with this tool, which it adds
 // itself, so the request to OpenRouter has to offer it too.
@@ -319,6 +329,8 @@ function configuredAgents(options: Readonly<Record<string, unknown>>) {
 export const register: Register = (on, options) => {
   const lowBalanceUsd = Number(options.lowBalanceUsd ?? 5)
   const autoMode = String(options.autoMode ?? 'refuse')
+  const privacy = String(options.privacy ?? 'zero-retention')
+  const privacyPrefs = PRIVACY[privacy] ?? PRIVACY['zero-retention']!
   const agents = configuredAgents(options)
   // The session's folder and home, for the path guard (set again on a reload's session.start)
   let cwd = ''
@@ -553,7 +565,9 @@ export const register: Register = (on, options) => {
     const budget = THINKING_BUDGET[effort] ?? THINKING_BUDGET.medium!
     const body = JSON.stringify({
       model: agent.model,
-      ...(agent.providers ? { provider: { order: agent.providers, allow_fallbacks: true } } : {}),
+      ...(agent.providers || Object.keys(privacyPrefs).length
+        ? { provider: { ...(agent.providers ? { order: agent.providers, allow_fallbacks: true } : {}), ...privacyPrefs } }
+        : {}),
       max_tokens: budget + ANSWER_TOKENS,
       stream: true,
       thinking: { type: 'enabled', budget_tokens: budget },
@@ -695,6 +709,12 @@ export const register: Register = (on, options) => {
         if (buffer) take(buffer)
 
         if (next.signal.aborted) return yield* fail('interrupted')
+        if (POLICY_ERROR.test(errorText) && !yielded) {
+          return yield* fail(
+            `no OpenRouter provider of ${agent.model} meets the privacy setting "${privacy}". ` +
+              `Pick another model for this agent, or change the openrouter-agents privacy option (/plugin configure)`,
+          )
+        }
         if (CONTEXT_ERROR.test(errorText) && !yielded) {
           return yield* fail(`the conversation is too long for ${agent.model}`, 'model_context_window_exceeded')
         }

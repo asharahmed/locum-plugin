@@ -1,6 +1,6 @@
 {
   "name": "openrouter-agents",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "description": "Native Agent-tool subagent types (deepseek, kimi, glm) whose model requests go to OpenRouter",
   "license": "MIT",
   "userConfig": {
@@ -9,6 +9,12 @@
       "title": "Low-balance warning (USD)",
       "description": "Show a notice at session start when the OpenRouter balance or key limit is below this. 0 turns it off.",
       "default": 5
+    },
+    "maxRunUsd": {
+      "type": "number",
+      "title": "Spend cap per run (USD)",
+      "description": "An OpenRouter subagent run stops, with a report saying so, once it has spent this much. 0 turns the cap off.",
+      "default": 0.5
     },
     "autoMode": {
       "type": "string",

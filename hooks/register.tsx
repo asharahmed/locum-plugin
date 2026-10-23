@@ -36,6 +36,9 @@ const DEFAULT_AGENTS: Record<string, AgentDef> = {
     vision: true,
     // Its output costs ~$10.80 per million tokens, and reasoning is output
     effort: 'low',
+    // Cheapest zero-retention providers (first call ~$0.0023 against Fireworks'
+    // $0.0147), then the cheapest once cached (tested 2026-10-23)
+    providers: ['wafer', 'inference-net', 'sail-research'],
     when: 'Use when the user asks for Kimi, or wants a second opinion from a different model family.',
   },
   glm: {
@@ -52,6 +55,9 @@ const DEFAULT_AGENTS: Record<string, AgentDef> = {
     label: 'DeepSeek V4 Flash',
     vision: false,
     effort: 'medium',
+    // Cheapest zero-retention providers, both caching (first call ~$0.0003
+    // against CoreWeave's $0.0009; tested 2026-10-23)
+    providers: ['relace', 'reka'],
     when: 'Very low cost ($0.044/$0.133 per million tokens). Use when the user asks for the cheap agent, or for tests and simple tasks.',
   },
 }
@@ -331,6 +337,8 @@ export const register: Register = (on, options) => {
   const autoMode = String(options.autoMode ?? 'refuse')
   const privacy = String(options.privacy ?? 'zero-retention')
   const privacyPrefs = PRIVACY[privacy] ?? PRIVACY['zero-retention']!
+  // Spend cap per run in USD; 0 turns it off
+  const maxRunUsd = Number(options.maxRunUsd ?? 0.5)
   const agents = configuredAgents(options)
   // The session's folder and home, for the path guard (set again on a reload's session.start)
   let cwd = ''
@@ -542,6 +550,28 @@ export const register: Register = (on, options) => {
       return done(text, 'end_turn', null)
     }
 
+    // Claude Code gives a subagent SubagentHandback only in some sessions, and says so
+    // in a reminder; offer it exactly then (never in auto mode, where only the
+    // classifier may allow it)
+    const engineOffersHandback = JSON.stringify(messages).includes('delivered through SubagentHandback')
+
+    // Over its spend cap, the run ends here, with a report saying so
+    if (maxRunUsd > 0 && run.usd >= maxRunUsd) {
+      const text =
+        `Stopped: this run reached the openrouter-agents spend cap of ${usd(maxRunUsd)} (spent ${usd(run.usd)} over ${run.steps} steps). ` +
+        `The work above is as far as it got. Raise maxRunUsd in /plugin configure to allow longer runs.`
+      if (!isAuto && engineOffersHandback) {
+        yield { kind: 'tool' as const, index: 0, id: `toolu_openrouter_cap_${e.index}`, name: HANDBACK_TOOL.name }
+        yield { kind: 'input' as const, index: 0, json: JSON.stringify({ message: text }) }
+        yield { kind: 'stop' as const, stopReason: 'tool_use' as const, usage: null }
+        return done('', 'tool_use', null, [{ name: HANDBACK_TOOL.name, input: { message: text } }])
+      }
+      if (isAuto) await patchRun($, agentId, r => ({ ...r, report: text }))
+      yield { kind: 'text' as const, index: 0, text }
+      yield { kind: 'stop' as const, stopReason: 'end_turn' as const, usage: null }
+      return done(text, 'end_turn', null)
+    }
+
     const session = await $.tool.list()
     const direct: ToolDef[] = session
       .filter(t => !t.mcp && TOOL_SCHEMAS[t.name])
@@ -550,10 +580,6 @@ export const register: Register = (on, options) => {
     const loaded: ToolDef[] = loadedTools(messages)
       .filter(name => !offered.has(name))
       .map(name => ({ name, description: session.find(t => t.name === name)?.description ?? name, input_schema: TOOL_SCHEMAS[name]! }))
-    // Claude Code gives a subagent SubagentHandback only in some sessions, and says so
-    // in a reminder; offer it exactly then (never in auto mode, where only the
-    // classifier may allow it)
-    const engineOffersHandback = JSON.stringify(messages).includes('delivered through SubagentHandback')
     const tools = !isAuto && engineOffersHandback ? [...direct, ...loaded, HANDBACK_TOOL] : [...direct, ...loaded]
     // Environment, date, CLAUDE.md and the rest arrive in the messages, as for a
     // native subagent; the system prompt is the agent definition's own.

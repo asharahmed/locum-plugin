@@ -8,6 +8,7 @@ They are native subagents: the Agent tool starts them, their tool calls run and 
 
 `OPENROUTER_API_KEY` must be in the environment `claude` starts from. Options (in `/plugin configure`):
 - `lowBalanceUsd` (default 5): a low-balance notice appears at session start below this; 0 turns it off.
+- `maxRunUsd` (default 0.5): a run that has spent this much stops before its next step, with a report saying so (through SubagentHandback when Claude Code offers it); 0 turns the cap off.
 - `autoMode` (`refuse` or `allow`, default `refuse`): whether these agents run in auto mode.
 - `privacy` (`zero-retention`, `no-data-collection` or `off`; default `zero-retention`): which OpenRouter providers may serve these agents. These subagents send your files and command output to the provider, so by default only zero-data-retention providers are used. All four default models have such providers (checked 2026-10-23); a model with none fails with a message naming this option.
 - `<agent>Model` and `<agent>Effort` for deepseek, kimi, glm and cheap: the OpenRouter model behind each, and its reasoning effort when the Agent call names none (defaults: medium; kimi low, since its output is expensive). A model other than the default loses DeepSeek's provider pin and is labelled by its ID.
@@ -49,3 +50,11 @@ Disable with `/plugin` or `claude plugin disable openrouter-agents@ashar-local`;
 ## State (0.6.6)
 
 What the plugin tracks per run (auto mode, the report waiting for delivery, tool calls, refused paths, cost, providers) lives in session state, declared in `types/index.d.ts`, so a `/reload-plugins` during a run keeps it. The path guard resolves relative paths, `~/` and folders a command `cd`s into. SubagentHandback is offered only when Claude Code's own reminder says the subagent has it.
+
+## Providers (0.6.9)
+
+With zero-retention routing, each agent is pinned to its cheapest qualifying providers (OpenRouter's others stay as fallback): deepseek to DeepInfra, Cloudflare; kimi to Wafer, InferenceNet, Sail Research; cheap to Relace, Reka. Measured 2026-10-23; a pin only applies while the agent uses its default model.
+
+## Tests
+
+`claude plugin test .` runs `tests/turn-step.test.ts`: recorded OpenRouter streams through the plugin's hooks, with the engine stood in for. They cover Kimi-style tool ids, the provider and privacy preferences in the request, a 429 retry, the privacy failure message, a stream cut off mid-reply, the spend cap, and the path guard with `~` and `cd` spellings. Breaking the tool-id cleaning or the guard makes the matching test fail.

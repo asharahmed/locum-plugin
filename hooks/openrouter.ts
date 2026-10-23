@@ -12,7 +12,14 @@ const CONTEXT_ERROR = /context (length|window)|too many tokens|prompt is too lon
 // OpenRouter's answer when no provider meets the privacy setting
 const POLICY_ERROR = /No endpoints found matching your data policy/i
 // OpenRouter's answers when the balance can't cover the request
-const CREDITS_ERROR = /could not verify available credits|insufficient credits|requires more credits|add more credits/i
+const CREDITS_ERROR = /insufficient credits|requires more credits|add more credits/i
+// OpenRouter's timing check against a request's worst-case cost ("could not verify
+// available credits for this request in time. Retry shortly"): it trips when the
+// balance is low and requests arrive together, and passes on a retry, more so
+// with a smaller output cap
+const CREDIT_CHECK = /could not verify available credits/i
+// The smallest output cap a credit-check retry lowers max_tokens to
+const MIN_MAX_TOKENS = 4096
 
 // One server-sent event of a streamed Messages API reply
 type StreamEvent = {
@@ -27,9 +34,10 @@ type StreamEvent = {
 
 export type Failure = {
   // policy: no provider meets the privacy setting; context: the conversation is
-  // too long; credits: the balance is too low; retryable: 429/5xx/network that
-  // outlasted the retries; other: anything else
-  kind: 'policy' | 'context' | 'credits' | 'retryable' | 'other' | 'interrupted'
+  // too long; credits: the balance is too low; creditCheck: OpenRouter couldn't
+  // confirm the balance covers the request in time, through every retry;
+  // retryable: 429/5xx/network that outlasted the retries; other: anything else
+  kind: 'policy' | 'context' | 'credits' | 'creditCheck' | 'retryable' | 'other' | 'interrupted'
   message: string
 }
 
@@ -56,6 +64,7 @@ function addUsage(into: Record<string, number>, from: Record<string, unknown> | 
 }
 
 function classify(errorText: string, status: number): Failure['kind'] {
+  if (CREDIT_CHECK.test(errorText)) return 'creditCheck'
   if (POLICY_ERROR.test(errorText)) return 'policy'
   if (CONTEXT_ERROR.test(errorText)) return 'context'
   if (CREDITS_ERROR.test(errorText) || status === 402) return 'credits'
@@ -88,7 +97,8 @@ export async function* streamStep($: EngineInterface, req: StepRequest) {
   }
   // Per content block: its tool call (if any) and the argument JSON so far
   const blocks = new Map<number, { tool?: { id: string; name: string }; json: string; handback?: true }>()
-  const input = JSON.stringify(req.body)
+  // Rebuilt when a credit-check retry lowers the output cap
+  const body = { ...req.body }
 
   for (let attempt = 0; ; attempt++) {
     // curl streams the SSE reply; $.http.fetch returns only whole bodies and
@@ -104,7 +114,7 @@ export async function* streamStep($: EngineInterface, req: StepRequest) {
         `${OPENROUTER}/messages`,
       ],
       env: { OR_KEY: req.key },
-      input,
+      input: JSON.stringify(body),
     })
 
     let buffer = ''
@@ -223,8 +233,15 @@ export async function* streamStep($: EngineInterface, req: StepRequest) {
     }
     const kind = classify(errorText, status)
     const message = `HTTP ${status || '?'}: ${errorText.slice(0, 300) || 'no reply'}`
-    if (kind !== 'retryable' || attempt >= RETRY_WAITS_MS.length) return { ...out, failure: { kind, message } }
-    req.onRetry(`HTTP ${status || 'network error'}`)
+    if ((kind !== 'retryable' && kind !== 'creditCheck') || attempt >= RETRY_WAITS_MS.length) return { ...out, failure: { kind, message } }
+    if (kind === 'creditCheck') {
+      // Halve the worst case OpenRouter checks the balance against
+      const cap = Math.max(MIN_MAX_TOKENS, Math.floor(Number(body.max_tokens ?? MIN_MAX_TOKENS * 2) / 2))
+      body.max_tokens = cap
+      const thinking = body.thinking as { type: string; budget_tokens: number } | undefined
+      if (thinking) body.thinking = { ...thinking, budget_tokens: Math.max(1024, Math.min(thinking.budget_tokens, cap - 2048)) }
+      req.onRetry('a credit check (lowering the output cap)')
+    } else req.onRetry(`HTTP ${status || 'network error'}`)
     await $.clock.sleep(RETRY_WAITS_MS[attempt] ?? 1000)
   }
 }

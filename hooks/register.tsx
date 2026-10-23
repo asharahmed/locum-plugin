@@ -321,7 +321,7 @@ export const register: Register = (on, options) => {
       if (outcome.provider) providers.add(outcome.provider)
       // A step its own model can't answer moves to the fallback model, once
       const first = outcome.failure
-      if (first && !outcome.yielded && (first.kind === 'retryable' || first.kind === 'other')) {
+      if (first && !outcome.yielded && (first.kind === 'retryable' || first.kind === 'other' || first.kind === 'creditCheck')) {
         const fallback = fallbackFor(agent)
         showStatus(`${agent.model} failing; trying ${fallback.model}`)
         const second = yield* request(fallback)
@@ -361,6 +361,12 @@ export const register: Register = (on, options) => {
       }
       if (failure.kind === 'context') return yield* fail(`the conversation is too long for ${agent.model}`, 'model_context_window_exceeded')
       if (failure.kind === 'credits') return yield* fail(`the OpenRouter balance is too low for this request. Top up at ${TOP_UP}`)
+      if (failure.kind === 'creditCheck') {
+        return yield* fail(
+          `OpenRouter couldn't confirm the balance covers this request, through every retry and the fallback model. ` +
+            `It does this when the balance is low; top up at ${TOP_UP}, or run fewer OpenRouter agents at once`,
+        )
+      }
       return yield* fail(failure.message)
     }
 

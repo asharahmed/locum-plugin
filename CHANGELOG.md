@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.3
+
+- OpenRouter's "could not verify available credits for this request in time. Retry shortly" is retried, with the output cap halved each time (down to 4,096 tokens) so the worst case it checks the balance against shrinks, then tried on the fallback model. It had been treated as an empty balance, and Kimi and GLM failed whenever several agents ran at once on a low balance.
+- A real shortfall (402, "Insufficient credits") still stops at once with the top-up link.
+- Tests for both (18 in all).
+
 ## 0.7.2
 
 - A run whose agent the settings no longer have (the custom slot cleared mid-run, say) stops with a message instead of carrying on on the session's own model. Any agent type named `openrouter-agents:…` counts as the plugin's own.

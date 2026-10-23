@@ -66,7 +66,7 @@ test('a step whose model keeps failing is answered by the fallback model', async
 })
 
 test('a low balance gets the top-up message and no fallback', async ($, on) => {
-  const requests = engine(on, ['{"error":{"message":"OpenRouter could not verify available credits for this request in time."}}\n__STATUS__402\n'])
+  const requests = engine(on, ['{"error":{"message":"Insufficient credits. Add more using https://openrouter.ai/settings/credits"}}\n__STATUS__402\n'])
   const { result } = await step($)
   expect(requests.length).toBe(1)
   expect(result.answer).toMatch(/balance is too low.*Top up at https:\/\/openrouter\.ai/)
@@ -82,4 +82,33 @@ test('a fallback setting equal to the agent\'s own model moves on to the next mo
   await pending
   expect(JSON.parse(requests[0]!).model).toBe('deepseek/deepseek-v4.1-flash-1017')
   expect(JSON.parse(requests[3]!).model).toBe('deepseek/deepseek-v4-flash-0731')
+})
+
+const CREDIT_CHECK = '{"error":{"message":"OpenRouter could not verify available credits for this request in time. Retry shortly."}}\n__STATUS__429\n'
+
+test('a credit-check failure is retried with a lower output cap', async ($, on) => {
+  const requests = engine(on, [CREDIT_CHECK, sse([start(), ...text(0, 'passed the check'), ...end('end_turn')])], 'openrouter-agents:kimi')
+  const pending = step($)
+  await requests.clock.settle()
+  await requests.clock.advance(1000)
+  const { result } = await pending
+  expect(requests.length).toBe(2)
+  const [first, second] = requests.map(r => JSON.parse(r))
+  expect(second.max_tokens).toBe(first.max_tokens / 2)
+  expect(second.thinking.budget_tokens).toBeLessThan(second.max_tokens)
+  expect(result.answer).toBe('passed the check')
+})
+
+test('a credit check that never passes ends with the low-balance advice', async ($, on) => {
+  const requests = engine(on, [CREDIT_CHECK], 'openrouter-agents:kimi')
+  const pending = step($)
+  for (const ms of [1000, 2000, 1000, 2000]) {
+    await requests.clock.settle()
+    await requests.clock.advance(ms)
+  }
+  const { result } = await pending
+  // three tries on Kimi, then three on the fallback model
+  expect(requests.length).toBe(6)
+  expect(JSON.parse(requests[3]!).model).toBe('deepseek/deepseek-v4-flash-0731')
+  expect(result.answer).toMatch(/couldn't confirm the balance.*top up/)
 })

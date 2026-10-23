@@ -1,6 +1,6 @@
 {
   "name": "openrouter-agents",
-  "version": "0.6.9",
+  "version": "0.7.0",
   "description": "Native Agent-tool subagent types (deepseek, kimi, glm) whose model requests go to OpenRouter",
   "license": "MIT",
   "userConfig": {
@@ -15,6 +15,12 @@
       "title": "Spend cap per run (USD)",
       "description": "An OpenRouter subagent run stops, with a report saying so, once it has spent this much. 0 turns the cap off.",
       "default": 0.5
+    },
+    "maxSessionUsd": {
+      "type": "number",
+      "title": "Spend cap per session (USD)",
+      "description": "Once OpenRouter subagents have spent this much in a session, new ones are refused and running ones stop at their next step. 0 turns the cap off.",
+      "default": 3
     },
     "autoMode": {
       "type": "string",
@@ -36,6 +42,12 @@
         "off"
       ],
       "default": "zero-retention"
+    },
+    "fallbackModel": {
+      "type": "string",
+      "title": "Fallback model",
+      "description": "OpenRouter model a step moves to, once, when its agent's own model keeps failing (outage, rate limit, provider error). Never a Claude model.",
+      "default": "deepseek/deepseek-v4-flash-0731"
     },
     "deepseekModel": {
       "type": "string",

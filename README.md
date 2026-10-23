@@ -1,60 +1,66 @@
 # openrouter-agents
 
-Adds four subagent types to a normal Claude Code session: `openrouter-agents:deepseek` (DeepSeek V4.1 Flash 1017), `openrouter-agents:kimi` (Kimi K3), `openrouter-agents:glm` (GLM-5.2) and `openrouter-agents:cheap` (DeepSeek V4 Flash 0731, the very low cost one for tests and simple tasks; it replaced Qwen 3.7 Flash in 0.6.7, whose only provider kept failing). The main session stays on your usual login and model.
+A Claude Code plugin that adds subagents running on OpenRouter models, while the main session stays on your usual login and model (Opus on a Claude subscription, say).
 
-They are native subagents: the Agent tool starts them, their tool calls run and show like any subagent's, and you can open their transcripts. A `turn.step` hook answers each of their model requests by sending the subagent's conversation to OpenRouter's Anthropic-compatible `/v1/messages` endpoint, so only those requests leave for OpenRouter.
+| Agent | Default model | Use it for |
+|---|---|---|
+| `openrouter-agents:deepseek` | `deepseek/deepseek-v4.1-flash-1017` | the default: coding, research, multi-step tasks |
+| `openrouter-agents:kimi` | `moonshotai/kimi-k3` | a second opinion from another model family |
+| `openrouter-agents:glm` | `z-ai/glm-5.2` | design and planning |
+| `openrouter-agents:cheap` | `deepseek/deepseek-v4-flash-0731` | tests and simple tasks, at ~$0.04 per million input tokens |
+| `openrouter-agents:custom` | any OpenRouter model you set | trying a model out |
+
+Ask for them as you would any subagent ("have kimi review this", "run the cheap agent on that").
+
+## How it works
+
+They are native Claude Code subagents: the Agent tool starts them, their tool calls run through Claude Code's own tools and permissions, and their transcripts open from the tasks list. A `turn.step` hook answers each of their model requests itself, streaming the subagent's conversation to OpenRouter's Anthropic-compatible `/v1/messages` endpoint through `curl`. Nothing a subagent asks goes to Anthropic.
+
+What the model is sent matches a native subagent's request: the context blocks Claude Code puts in its messages (environment, date, `CLAUDE.md` when the agent gets it), the native subagent tool pool's built-in tools, and the agent definition's prompt as the system prompt. The model-identity line is rewritten to name the real model, and the subagent view's header and the band above the prompt name it too. Reasoning streams live as thinking.
 
 ## Setup
 
-`OPENROUTER_API_KEY` must be in the environment `claude` starts from. Options (in `/plugin configure`):
-- `lowBalanceUsd` (default 5): a low-balance notice appears at session start below this; 0 turns it off.
-- `maxRunUsd` (default 0.5): a run that has spent this much stops before its next step, with a report saying so (through SubagentHandback when Claude Code offers it); 0 turns the cap off.
-- `autoMode` (`refuse` or `allow`, default `refuse`): whether these agents run in auto mode.
-- `privacy` (`zero-retention`, `no-data-collection` or `off`; default `zero-retention`): which OpenRouter providers may serve these agents. These subagents send your files and command output to the provider, so by default only zero-data-retention providers are used. All four default models have such providers (checked 2026-10-23); a model with none fails with a message naming this option.
-- `<agent>Model` and `<agent>Effort` for deepseek, kimi, glm and cheap: the OpenRouter model behind each, and its reasoning effort when the Agent call names none (defaults: medium; kimi low, since its output is expensive). A model other than the default loses DeepSeek's provider pin and is labelled by its ID.
-- `customModel`, `customLabel`, `customEffort`: a free slot. Set `customModel` to any OpenRouter model ID and an `openrouter-agents:custom` agent runs on it.
+`OPENROUTER_API_KEY` must be in the environment `claude` starts from. Install from this folder (a local marketplace), then `/reload-plugins`.
 
-At session start the plugin checks each configured model against OpenRouter's model list (a notice names any that don't exist) and reads whether it takes images.
+`/openrouter` shows your OpenRouter balance, each agent's model, effort and providers, the settings, and this session's runs with their cost.
 
-## What you see
+## Settings (`/plugin configure openrouter-agents@ashar-local`)
 
-- The subagent's reasoning streams live as thinking, then its text and tool calls, as for a native subagent. Claude Code keeps only thinking Anthropic signed, so reasoning isn't saved in the subagent's transcript.
-- The status line shows the agent, its step count and its OpenRouter spend so far; when the run ends, a transcript line gives the total.
+| Option | Default | What it does |
+|---|---|---|
+| `privacy` | `zero-retention` | Which OpenRouter providers may serve these agents: `zero-retention` (providers that keep no prompts), `no-data-collection` (none that store or train on prompts) or `off`. The subagents send your files and command output to the provider. |
+| `maxRunUsd` | 0.5 | A run that has spent this much stops before its next step, with a report saying so. 0: no cap. |
+| `maxSessionUsd` | 3 | Once the session's OpenRouter subagents have spent this much, new ones are refused and running ones stop. 0: no cap. |
+| `fallbackModel` | `deepseek/deepseek-v4-flash-0731` | When a step's model keeps failing (outage, rate limit, provider error), the step is retried once on this model. Never a Claude model. |
+| `autoMode` | `refuse` | Whether these agents run in auto mode (see below). |
+| `lowBalanceUsd` | 5 | A notice at session start when the balance or key limit is below this. 0: off. |
+| `<agent>Model`, `<agent>Effort` | per agent | The model behind deepseek, kimi, glm and cheap, and the reasoning effort when the Agent call names none (kimi defaults to low: its output is expensive). |
+| `customModel`, `customLabel`, `customEffort` | empty | Set `customModel` to any OpenRouter model ID and `openrouter-agents:custom` runs on it. |
+
+With the default models, each agent is pinned to its cheapest zero-retention providers (others stay as fallback): deepseek to DeepInfra and Cloudflare, kimi to Wafer, InferenceNet and Sail Research, cheap to Relace and Reka. A model other than the default isn't pinned.
+
+## Auto mode
+
+Auto mode's safety check runs server-side on Anthropic's responses, so it refuses every tool call an OpenRouter subagent makes, and a permission prompt doesn't get past it. With `autoMode: refuse` the plugin won't start these agents in auto mode.
+
+With `autoMode: allow`, what the check would have reviewed is allowed unreviewed (deny rules still apply). SubagentHandback accepts only the check's approval, so the agent ends with a plain-text report that the plugin delivers in the completion notice, labelled "Auto mode did not review this report or the work behind it" and listing the tool calls the agent actually made. An agent that reports without any tool calls is nudged once to do the work. SendMessage is refused, so the labelled report is the only way results reach the main session.
+
+## Guards
+
+- A path refused to Write, Edit, NotebookEdit or Read is refused to Bash too, however the command spells it (relative, `~/…`, after a `cd`).
+- The system prompt tells the model not to work around a refusal or a tool it can't use.
+- If the plugin's step hook fails, the step ends with an error instead of being finished on the session's own model.
+- Per-run state (auto mode, the report, tool calls, refused paths, cost) lives in Claude Code's session state, so `/reload-plugins` mid-run keeps it.
 
 ## Limits
 
-- Tools: Claude Code grants these agents the native subagent tool pool. The mod offers the model every built-in in that pool the session has (Read, Bash, Edit, Write, NotebookEdit, LSP, WebFetch, WebSearch, TodoWrite, Skill, ToolSearch, Monitor, TaskStop, SendMessage, Artifact, EnterWorktree, ExitWorktree on this build), plus SubagentHandback. Plugins can't read tool schemas, so `hooks/schemas.ts` is generated from Claude Code's plugin type file; after a Claude Code update, rerun `python3 -I scripts/gen-schemas.py <path to claude-code.d.ts>` (needs npx; the path is printed when the plugin-authoring skill loads).
-- MCP tools can't be used. ToolSearch answers with references that only Anthropic's API expands into schemas, and no plugin API exposes an MCP tool's schema. The model is told plainly when a tool it loaded can't be used.
-- Context: environment, date, CLAUDE.md (unless the agent omits it) and the other context blocks reach the model exactly as Claude Code puts them in a native subagent's messages. The model-identity line is rewritten to name the real model. The system prompt is the agent definition's own.
-- Images go to DeepSeek and Kimi as they are; GLM-5.2 is text-only, so it gets a note in their place. Documents (PDF blocks) become a note for all three.
-- Reasoning budget follows the Agent call's `effort` (or the session's): low 1k, medium 4k, high 8k, xhigh 12k, max 16k tokens.
-- The subagent and its messages are labelled with the OpenRouter model (the plugin names it at spawn). Claude Code logs a harmless validation error for that, since the Agent tool's `model` normally takes only Claude aliases.
-- With one of these subagents' transcripts open, the band above the prompt names its model, and the header's "Using <model> (from …)" notice is redrawn to name it too. The "Opus 5.5 · Claude Max" line under the logo has no render hook, so it keeps showing the session's model.
-- Auto mode: its safety check runs server-side on Anthropic's responses, so it refuses every tool call these agents make, and a permission prompt doesn't get past it. With the `autoMode` option at `refuse` (the default) the plugin won't start these agents in auto mode. At `allow`, what the safety check would have reviewed is allowed unreviewed (deny rules still apply), and since SubagentHandback accepts only the classifier's approval, the agent ends with a plain-text report that the plugin delivers in the completion notice (or the Agent result), labelled as not reviewed by auto mode.
-- Requests stream through `curl` (`$.http.fetch` gives up after 30 s). A 429, 5xx or network error before any output is retried twice; a stream cut off mid-reply keeps what arrived and the run goes on. A context-length error ends the step as `model_context_window_exceeded`.
-- If the hook itself fails, the step ends with an error instead of quietly running on the session's own model. (Without that handler Claude Code finishes a failed step on Opus.)
-- Prompt caching: the system prompt and the latest message are marked for caching. Kimi and GLM cache on OpenRouter; DeepSeek's current provider doesn't.
-- Persistent 429s ("could not verify available credits") usually mean the OpenRouter balance is low.
+- MCP tools can't be used: ToolSearch answers with references only Anthropic's API expands, and no plugin API exposes an MCP tool's schema. The model is told when a tool it loaded can't be used.
+- Built-in tool schemas aren't readable by plugins, so `hooks/schemas.ts` is generated from Claude Code's plugin type file. After a Claude Code update, rerun `python3 -I scripts/gen-schemas.py <path to claude-code.d.ts>` (needs npx; the path is printed when the plugin-authoring skill loads).
+- The line under the logo ("Opus 5.5 · Claude Max") has no render hook, so it keeps naming the session's model. Claude Code's own cost summary doesn't count OpenRouter spend; `/openrouter` and each run's closing line do.
+- Images go to models that take them (looked up at session start); others, and the fallback model, get a note in their place. PDF blocks become a note for all.
 
-## Turning it off
+## Development
 
-Disable with `/plugin` or `claude plugin disable openrouter-agents@ashar-local`; remove with `claude plugin uninstall openrouter-agents@ashar-local`.
-
-## Guards (0.6.5)
-
-- In auto mode the delivered report's label lists the tool calls the agent made ("Tool calls this run: Bash ×2, Write (3)", or "none"), so a report of work that never happened stands out.
-- In auto mode SendMessage is refused for these agents, so results reach the main session only through the labelled report.
-- In any mode, once Write, Edit, NotebookEdit or Read is refused for a path, a Bash command that names that path is refused too.
-- DeepSeek is pinned to DeepInfra, then Cloudflare (both cache prompts), with OpenRouter's other providers as fallback. The end-of-run line names the providers that served the run.
-
-## State (0.6.6)
-
-What the plugin tracks per run (auto mode, the report waiting for delivery, tool calls, refused paths, cost, providers) lives in session state, declared in `types/index.d.ts`, so a `/reload-plugins` during a run keeps it. The path guard resolves relative paths, `~/` and folders a command `cd`s into. SubagentHandback is offered only when Claude Code's own reminder says the subagent has it.
-
-## Providers (0.6.9)
-
-With zero-retention routing, each agent is pinned to its cheapest qualifying providers (OpenRouter's others stay as fallback): deepseek to DeepInfra, Cloudflare; kimi to Wafer, InferenceNet, Sail Research; cheap to Relace, Reka. Measured 2026-10-23; a pin only applies while the agent uses its default model.
-
-## Tests
-
-`claude plugin test .` runs `tests/turn-step.test.ts`: recorded OpenRouter streams through the plugin's hooks, with the engine stood in for. They cover Kimi-style tool ids, the provider and privacy preferences in the request, a 429 retry, the privacy failure message, a stream cut off mid-reply, the spend cap, and the path guard with `~` and `cd` spellings. Breaking the tool-id cleaning or the guard makes the matching test fail.
+- `hooks/register.tsx` wires the hooks; `agents.ts` holds the agents and settings, `openrouter.ts` the streaming client, `messages.ts` what the model is sent, `guard.ts` the path guard, `state.ts` the run state, `schemas.ts` the generated tool schemas. `types/index.d.ts` declares the state.
+- `claude plugin validate .` and `claude plugin test .` (recorded OpenRouter streams through the hooks, with the engine stood in for; no credits spent).
+- Turn it off with `claude plugin disable openrouter-agents@ashar-local`; remove it with `claude plugin uninstall openrouter-agents@ashar-local`.

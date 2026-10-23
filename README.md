@@ -1,6 +1,6 @@
 # openrouter-agents
 
-Adds four subagent types to a normal Claude Code session: `openrouter-agents:deepseek` (DeepSeek V4.1 Flash 1017), `openrouter-agents:kimi` (Kimi K3), `openrouter-agents:glm` (GLM-5.2) and `openrouter-agents:qwen` (Qwen 3.7 Flash, the very low cost one for tests and simple tasks). The main session stays on your usual login and model.
+Adds four subagent types to a normal Claude Code session: `openrouter-agents:deepseek` (DeepSeek V4.1 Flash 1017), `openrouter-agents:kimi` (Kimi K3), `openrouter-agents:glm` (GLM-5.2) and `openrouter-agents:cheap` (DeepSeek V4 Flash 0731, the very low cost one for tests and simple tasks; it replaced Qwen 3.7 Flash in 0.6.7, whose only provider kept failing). The main session stays on your usual login and model.
 
 They are native subagents: the Agent tool starts them, their tool calls run and show like any subagent's, and you can open their transcripts. A `turn.step` hook answers each of their model requests by sending the subagent's conversation to OpenRouter's Anthropic-compatible `/v1/messages` endpoint, so only those requests leave for OpenRouter.
 
@@ -9,7 +9,7 @@ They are native subagents: the Agent tool starts them, their tool calls run and 
 `OPENROUTER_API_KEY` must be in the environment `claude` starts from. Options (in `/plugin configure`):
 - `lowBalanceUsd` (default 5): a low-balance notice appears at session start below this; 0 turns it off.
 - `autoMode` (`refuse` or `allow`, default `refuse`): whether these agents run in auto mode.
-- `<agent>Model` and `<agent>Effort` for deepseek, kimi, glm and qwen: the OpenRouter model behind each, and its reasoning effort when the Agent call names none (defaults: medium; kimi low, since its output is expensive). A model other than the default loses DeepSeek's provider pin and is labelled by its ID.
+- `<agent>Model` and `<agent>Effort` for deepseek, kimi, glm and cheap: the OpenRouter model behind each, and its reasoning effort when the Agent call names none (defaults: medium; kimi low, since its output is expensive). A model other than the default loses DeepSeek's provider pin and is labelled by its ID.
 - `customModel`, `customLabel`, `customEffort`: a free slot. Set `customModel` to any OpenRouter model ID and an `openrouter-agents:custom` agent runs on it.
 
 At session start the plugin checks each configured model against OpenRouter's model list (a notice names any that don't exist) and reads whether it takes images.

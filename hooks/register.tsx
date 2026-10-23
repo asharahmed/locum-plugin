@@ -45,12 +45,14 @@ const DEFAULT_AGENTS: Record<string, AgentDef> = {
     effort: 'medium',
     when: 'Use when the user asks for GLM, or for design and planning work.',
   },
-  qwen: {
-    model: 'qwen/qwen3.7-flash',
-    label: 'Qwen 3.7 Flash',
-    vision: true,
+  // Replaced qwen/qwen3.7-flash (one provider, Alibaba, which kept erroring):
+  // 26 tool-capable endpoints, 5/5 on live tool-call tests, ZDR providers available
+  cheap: {
+    model: 'deepseek/deepseek-v4-flash-0731',
+    label: 'DeepSeek V4 Flash',
+    vision: false,
     effort: 'medium',
-    when: 'Very low cost ($0.03/$0.13 per million tokens). Use when the user asks for Qwen or the cheap agent, or for tests and simple tasks.',
+    when: 'Very low cost ($0.044/$0.133 per million tokens). Use when the user asks for the cheap agent, or for tests and simple tasks.',
   },
 }
 

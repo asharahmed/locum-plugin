@@ -20,7 +20,23 @@ What the model is sent matches a native subagent's request: the context blocks C
 
 ## Setup
 
-`OPENROUTER_API_KEY` must be in the environment `claude` starts from. Install from this folder (a local marketplace), then `/reload-plugins`.
+`OPENROUTER_API_KEY` must be in the environment `claude` starts from (exported from your shell profile, say).
+
+From a clone of this repository:
+
+```
+claude plugin marketplace add /path/to/claude-openrouter-agents
+claude plugin install openrouter-agents@ashar-local --scope user
+```
+
+Or straight from GitHub (a private repository needs `gh` or git signed in to an account that can read it):
+
+```
+claude plugin marketplace add asharahmed/claude-openrouter-agents
+claude plugin install openrouter-agents@ashar-local --scope user
+```
+
+Then `/reload-plugins` in a running session, or start a new one. A marketplace added from a folder is read from that folder, so after `git pull` a `/reload-plugins` picks up the new version.
 
 `/openrouter` shows your OpenRouter balance, each agent's model, effort and providers, the settings, and this session's runs with their cost.
 
@@ -62,5 +78,5 @@ With `autoMode: allow`, what the check would have reviewed is allowed unreviewed
 ## Development
 
 - `hooks/register.tsx` wires the hooks; `agents.ts` holds the agents and settings, `openrouter.ts` the streaming client, `messages.ts` what the model is sent, `guard.ts` the path guard, `state.ts` the run state, `schemas.ts` the generated tool schemas. `types/index.d.ts` declares the state.
-- `claude plugin validate .` and `claude plugin test .` (recorded OpenRouter streams through the hooks, with the engine stood in for; no credits spent).
+- `claude plugin validate .` and `claude plugin test .`: recorded OpenRouter streams through the hooks, with the engine stood in for, so no credits are spent. `tests/helpers.ts` holds the stand-ins; the tests are split by area (stream, caps, guard, auto mode, command, routing).
 - Turn it off with `claude plugin disable openrouter-agents@ashar-local`; remove it with `claude plugin uninstall openrouter-agents@ashar-local`.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2
+
+- A run whose agent the settings no longer have (the custom slot cleared mid-run, say) stops with a message instead of carrying on on the session's own model. Any agent type named `openrouter-agents:…` counts as the plugin's own.
+- The status line says what a run does after each step (running tools, finishing, stopped) instead of always "waiting on tools".
+- Zero costs show as $0.00.
+- README: exact install commands, from a clone or from GitHub.
+- Tests split by area into six files with shared stand-ins in `tests/helpers.ts`; a test for the unconfigured-agent stop (16 in all).
+
 ## 0.7.1
 
 - Another plugin's or a built-in subagent is looked up once, then passed straight through (each of its steps and tool checks had listed every agent).

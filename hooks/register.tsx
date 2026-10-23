@@ -24,7 +24,7 @@ const THINKING_BUDGET: Record<string, number> = { low: 1024, medium: 4000, high:
 const ANSWER_TOKENS = 12000
 const TOP_UP = 'https://openrouter.ai/settings/credits'
 
-const usd = (v: number) => `$${v < 0.01 ? v.toFixed(4) : v.toFixed(2)}`
+const usd = (v: number) => (v === 0 ? '$0.00' : `$${v < 0.01 ? v.toFixed(4) : v.toFixed(2)}`)
 
 export const register: Register = (on, options) => {
   const settings = readSettings(options)
@@ -223,8 +223,16 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined) return yield* next(e)
     const agentId = e.agentId
     const run = await runOf($, agents, agentId)
-    const agent = run ? agents[run.name] : undefined
-    if (!run || !agent) return yield* next(e)
+    if (!run) return yield* next(e)
+    const agent = agents[run.name]
+    // A run of an agent the settings no longer have (the custom slot cleared, say)
+    // must not carry on on the session's own model
+    if (!agent) {
+      const text = `[${run.name} via OpenRouter: this agent is no longer configured (check /plugin configure), so the run stops here.]`
+      yield { kind: 'text' as const, index: 0, text }
+      yield { kind: 'stop' as const, stopReason: 'end_turn' as const, usage: null }
+      return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn' as const, usage: null }
+    }
     const owner = run.name
     const stepKey = `${e.turnId}:${e.index}`
     const isAuto = run.isAuto
@@ -337,8 +345,10 @@ export const register: Register = (on, options) => {
         providers: [...providers],
         fallbackSteps: r.fallbackSteps + (usedFallback ? 1 : 0),
       }))
-      $.ui.status(`${owner} · ${agent.label}: waiting on tools · ${run.steps + 1} step${run.steps === 0 ? '' : 's'} · ${usd(run.usd + stepCost)}`)
     }
+    // What the run does next: its tools run, or it is finishing
+    const waiting = outcome.failure ? 'stopped' : outcome.toolUses.length ? 'running tools' : 'finishing'
+    $.ui.status(`${owner} · ${agent.label}: ${waiting} · ${run.steps + 1} step${run.steps === 0 ? '' : 's'} · ${usd(run.usd + stepCost)}`)
 
     const failure = outcome.failure
     if (failure) {

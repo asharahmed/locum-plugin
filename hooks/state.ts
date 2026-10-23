@@ -65,13 +65,14 @@ export async function runOf($: EngineInterface, agents: Record<string, AgentDef>
   if (run) return run
   const info = (await $.agent.list()).find(a => a.id === agentId)
   const name = agentName(info?.type, $.plugin.name)
-  const agent = agents[name]
   // An agent the list doesn't know yet may still be starting; only a known one is ruled out
-  if (!agent) {
+  if (!name) {
     if (info) notOurs.add(agentId)
     return undefined
   }
-  const created = newRun(name, agent.model, false, await $.clock.now())
+  // Ours even when the settings no longer have it, so its steps never fall to the
+  // session's model (turn.step stops such a run)
+  const created = newRun(name, agents[name]?.model ?? '', false, await $.clock.now())
   await update($, runsAtom, runs => (runs[agentId] ? runs : { ...runs, [agentId]: created }))
   return (await getRun($, agentId)) ?? created
 }

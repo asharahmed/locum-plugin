@@ -2,6 +2,7 @@ import type { Register, TurnStepResult, TurnStepToolUse, TurnStopReason, TurnUsa
 import type { AgentRun } from '../types'
 import type { AgentDef } from './agents'
 import { agentName, fallbackModelFor, readSettings } from './agents'
+import { TOP_UP, addSpend, applyOverrides, readOverrides, runCommand, usd } from './commands'
 import { FILE_TOOLS, REFUSAL, normalizePath, refusedPathIn } from './guard'
 import {
   AUTO_REPORT_RULE,
@@ -22,9 +23,6 @@ import { allRuns, getRun, newRun, patchRun, putRun, runOf, sessionUsd } from './
 // Reasoning budget per effort level; the answer gets ANSWER_TOKENS beyond it
 const THINKING_BUDGET: Record<string, number> = { low: 1024, medium: 4000, high: 8000, xhigh: 12000, max: 16000 }
 const ANSWER_TOKENS = 12000
-const TOP_UP = 'https://openrouter.ai/settings/credits'
-
-const usd = (v: number) => (v === 0 ? '$0.00' : `$${v < 0.01 ? v.toFixed(4) : v.toFixed(2)}`)
 
 export const register: Register = (on, options) => {
   const settings = readSettings(options)
@@ -69,6 +67,8 @@ export const register: Register = (on, options) => {
     const started = await next(e)
     cwd = e.cwd
     home = (await $.env.get('HOME')) ?? ''
+    // Models chosen with `/openrouter use` win over the configured ones
+    applyOverrides(settings, await readOverrides($).catch(() => ({})))
     for (const [name, a] of Object.entries(agents)) {
       await $.agent.register({
         name,
@@ -77,7 +77,7 @@ export const register: Register = (on, options) => {
         prompt: SUBAGENT_PROMPT,
       })
     }
-    await $.command.register({ name: 'openrouter', description: "OpenRouter subagents: balance, agents, settings and this session's runs" })
+    await $.command.register({ name: 'openrouter', description: 'OpenRouter subagents: balance, agents, spend, models (/openrouter help)' })
 
     // In the background, so a slow OpenRouter never holds up the session: check the
     // configured models exist and whether they take images, and the balance
@@ -338,6 +338,7 @@ export const register: Register = (on, options) => {
     } catch (err) {
       return yield* fail(String(err).slice(0, 300))
     } finally {
+      await addSpend($, owner, stepCost).catch(() => {})
       await patchRun($, agentId, r => ({
         ...r,
         steps: r.steps + 1,
@@ -410,48 +411,14 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // /openrouter: what the plugin is set to and what it has spent
-  on('command.run', { command: 'openrouter' }, async $ => {
+  // /openrouter: what the plugin is set to and what it has spent, plus subcommands
+  on('command.run', { command: 'openrouter' }, async ($, e) => {
     const runs = Object.entries(await allRuns($)).sort(([, a], [, b]) => b.startedAt - a.startedAt)
-    const spent = runs.reduce((sum, [, r]) => sum + r.usd, 0)
-    const key = await $.env.get('OPENROUTER_API_KEY')
-    let money = 'Balance: OPENROUTER_API_KEY is not set in the environment claude started from.'
-    if (key) {
-      const { account, keyLeft } = await balanceOf($, key).catch(() => ({ account: undefined, keyLeft: undefined }))
-      money =
-        `Balance: ${account !== undefined ? `${usd(account)} on the account` : 'unknown'}` +
-        (keyLeft !== undefined ? `, ${usd(keyLeft)} left on this key's limit` : '') +
-        `. Top up at ${TOP_UP}`
-    }
     const version = await $.fs
-      .read('.claude-plugin/plugin.json')
+      .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
       .then(t => String((JSON.parse(String(t)) as { version?: unknown }).version ?? ''))
       .catch(() => '')
-    const lines = [
-      `OpenRouter subagents${version ? ` ${version}` : ''}`,
-      money,
-      `This session: ${runs.length} run${runs.length === 1 ? '' : 's'}, ${usd(spent)} spent. Caps: ${settings.maxRunUsd > 0 ? usd(settings.maxRunUsd) : 'none'} per run, ${settings.maxSessionUsd > 0 ? usd(settings.maxSessionUsd) : 'none'} per session.`,
-      `Settings: privacy ${settings.privacy}, auto mode ${settings.autoMode}, fallback model ${settings.fallbackModel}.`,
-      '',
-      'Agents:',
-      ...Object.entries(agents).map(
-        ([name, a]) =>
-          `  ${name.padEnd(9)} ${a.model} · effort ${a.effort}${a.providers ? ` · providers ${a.providers.join(', ')}` : ''}${a.vision ? '' : ' · no images'}`,
-      ),
-    ]
-    if (runs.length) {
-      lines.push('', 'Runs (newest first):')
-      for (const [, r] of runs.slice(0, 10)) {
-        const flags = [r.isAuto ? 'auto mode' : '', r.isDone ? '' : 'running', r.fallbackSteps ? `${r.fallbackSteps} fallback steps` : ''].filter(Boolean)
-        lines.push(
-          `  ${r.name.padEnd(9)} ${r.steps} steps · ${usd(r.usd)}${r.providers.length ? ` · ${r.providers.join(', ')}` : ''}${flags.length ? ` · ${flags.join(', ')}` : ''}`,
-          `            ${toolSummary(r.toolNames)}`,
-        )
-      }
-      if (runs.length > 10) lines.push(`  …and ${runs.length - 10} earlier`)
-    }
-    lines.push('', 'Change settings with /plugin configure openrouter-agents@ashar-local.')
-    return { text: lines.join('\n') }
+    return { text: await runCommand($, e.args ?? '', settings, runs, version) }
   })
 
   // Opening one of our agents' transcripts shows the session's model in the

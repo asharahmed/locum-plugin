@@ -38,7 +38,17 @@ claude plugin install openrouter-agents@ashar-local --scope user
 
 Then `/reload-plugins` in a running session, or start a new one. A marketplace added from a folder is read from that folder, so after `git pull` a `/reload-plugins` picks up the new version.
 
-`/openrouter` shows your OpenRouter balance, each agent's model, effort and providers, the settings, and this session's runs with their cost.
+## The `/openrouter` command
+
+| Command | What it does |
+|---|---|
+| `/openrouter` | Balance and key limit, each agent's model, effort and providers, the settings, spend history (today, last 7 days, all recorded, per agent, across sessions), and this session's runs. |
+| `/openrouter models [search]` | Tool-capable OpenRouter models matching the search, cheapest input first, with price, context, images and reasoning. |
+| `/openrouter use <agent> <model>` | Runs an agent on another OpenRouter model, checked against OpenRouter's list (it must support tool calls). Kept across sessions; takes effect after `/reload-plugins`. Wins over `/plugin configure` until undone. |
+| `/openrouter use <agent> default` | Back to the configured model. |
+| `/openrouter help` | The list above. |
+
+The spend history and `use` choices live in the plugin's own store (`$.store`), not in Claude Code's settings.
 
 ## Settings (`/plugin configure openrouter-agents@ashar-local`)
 
@@ -77,6 +87,6 @@ With `autoMode: allow`, what the check would have reviewed is allowed unreviewed
 
 ## Development
 
-- `hooks/register.tsx` wires the hooks; `agents.ts` holds the agents and settings, `openrouter.ts` the streaming client, `messages.ts` what the model is sent, `guard.ts` the path guard, `state.ts` the run state, `schemas.ts` the generated tool schemas. `types/index.d.ts` declares the state.
+- `hooks/register.tsx` wires the hooks; `agents.ts` holds the agents and settings, `commands.ts` `/openrouter`, the spend ledger and `use` choices, `openrouter.ts` the streaming client, `messages.ts` what the model is sent, `guard.ts` the path guard, `state.ts` the run state, `schemas.ts` the generated tool schemas. `types/index.d.ts` declares the state.
 - `claude plugin validate .` and `claude plugin test .`: recorded OpenRouter streams through the hooks, with the engine stood in for, so no credits are spent. `tests/helpers.ts` holds the stand-ins; the tests are split by area (stream, caps, guard, auto mode, command, routing).
 - Turn it off with `claude plugin disable openrouter-agents@ashar-local`; remove it with `claude plugin uninstall openrouter-agents@ashar-local`.

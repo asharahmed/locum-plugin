@@ -30,8 +30,9 @@ export const end = (stop_reason: string, cost = 0.001) => [
 // taken from `replies`, one per request
 export const TASK = [{ role: 'user', content: [{ type: 'text', text: 'Do the task.' }] }]
 
-export function engine(on: any, replies: string[], type = 'openrouter-agents:cheap', messages: object[] = TASK) {
+export function engine(on: any, replies: string[], type = 'openrouter-agents:cheap', messages: object[] = TASK, store: Record<string, unknown> = {}) {
   const clock = mock.clock(on)
+  mock.store(on, store)
   mock.env(on, { OPENROUTER_API_KEY: 'test-key', HOME: '/home/t' })
   on('agent.list', () => ({ value: [{ id: AGENT_ID, type, description: 'test', status: 'running' }] }))
   on('session.messages', () => ({ value: messages }))
@@ -57,3 +58,22 @@ export async function step($: any, index = 0) {
 }
 
 export const RETRYABLE = '{"error":{"message":"upstream overloaded"}}\n__STATUS__503\n'
+
+// Session start's calls: agent and command registration, and the model list
+export function sessionStart(on: any, models: object[] = []) {
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  on('agent.register', (_$: unknown, e: { name: string }) => ({ value: { agent: `openrouter-agents:${e.name}` } }))
+  on('command.register', (_$: unknown, e: { name: string }) => ({ value: { command: e.name } }))
+  on('http.fetch', (_$: unknown, e: { url: string }) => ({
+    value: e.url.endsWith('/models')
+      ? { status: 200, ok: true, headers: {}, text: JSON.stringify({ data: models }) }
+      : { status: 500, ok: false, headers: {}, text: '' },
+  }))
+}
+
+export const MODELS = [
+  { id: 'deepseek/deepseek-v4-flash-0731', pricing: { prompt: '0.000000044', completion: '0.000000133' }, context_length: 1048576, architecture: { input_modalities: ['text'] }, supported_parameters: ['tools', 'reasoning'] },
+  { id: 'openai/gpt-oss-20b', pricing: { prompt: '0.000000018', completion: '0.00000009' }, context_length: 131072, architecture: { input_modalities: ['text'] }, supported_parameters: ['tools', 'reasoning'] },
+  { id: 'google/gemma-4-26b-a4b-it', pricing: { prompt: '0.000000068', completion: '0.000000225' }, context_length: 262144, architecture: { input_modalities: ['text', 'image'] }, supported_parameters: ['tools'] },
+  { id: 'some/no-tools-model', pricing: { prompt: '0.00000001', completion: '0.00000001' }, supported_parameters: [] },
+]

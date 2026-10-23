@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0
+
+- Spend history across sessions: each step's cost is added to a per-day, per-agent ledger in the plugin's store; `/openrouter` shows today, the last 7 days and everything recorded.
+- `/openrouter models [search]`: tool-capable OpenRouter models, cheapest input first, with price, context, images and reasoning.
+- `/openrouter use <agent> <model>` and `use <agent> default`: run an agent on another model, checked against OpenRouter's list and kept across sessions.
+- `/openrouter help`; the command module moved to `hooks/commands.ts`.
+- Fix: `/openrouter` read the manifest relative to the session's folder, so the version from 0.7.1 never showed outside tests; it now reads it from the plugin's folder.
+- Tests for the ledger, `models`, `use` and `help` (22 in all).
+
 ## 0.7.3
 
 - OpenRouter's "could not verify available credits for this request in time. Retry shortly" is retried, with the output cap halved each time (down to 4,096 tokens) so the worst case it checks the balance against shrinks, then tried on the fallback model. It had been treated as an empty balance, and Kimi and GLM failed whenever several agents ran at once on a low balance.

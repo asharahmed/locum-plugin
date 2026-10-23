@@ -1,16 +1,30 @@
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, TurnStepResult, TurnStepToolUse, TurnStopReason, TurnUsage } from 'claude-code'
+import type { AgentRun } from '../types'
 import { TOOL_SCHEMAS } from './schemas'
 
-// Subagent types this mod answers, each pinned to one OpenRouter model.
-// The Agent tool sees them as `openrouter-agents:<name>`. They are ordinary
-// native subagents; only their model requests go to OpenRouter.
-// `vision`: whether the model takes images (from OpenRouter's model list).
-// `providers`: OpenRouter providers to try first (others still serve as fallbacks).
-const AGENTS: Record<string, { model: string; label: string; when: string; vision: boolean; providers?: string[] }> = {
+type AgentDef = {
+  model: string
+  label: string
+  when: string
+  // Whether the model takes images; refreshed from OpenRouter's model list at session start
+  vision: boolean
+  // Reasoning effort when the Agent call names none
+  effort: string
+  // OpenRouter providers to try first (others still serve as fallbacks)
+  providers?: string[]
+}
+
+// Subagent types this mod answers, each pinned to one OpenRouter model. The
+// Agent tool sees them as `openrouter-agents:<name>`. They are ordinary native
+// subagents; only their model requests go to OpenRouter. Each model and effort
+// can be changed in /plugin configure (`<name>Model`, `<name>Effort`).
+const DEFAULT_AGENTS: Record<string, AgentDef> = {
   deepseek: {
     model: 'deepseek/deepseek-v4.1-flash-1017',
     label: 'DeepSeek V4.1 Flash',
     vision: true,
+    effort: 'medium',
     // These two cache prompts; unpinned, runs landed on a provider that didn't
     // (tested 2026-10-23: a cached second call cost ~1/12 of the first)
     providers: ['deepinfra', 'cloudflare'],
@@ -20,18 +34,22 @@ const AGENTS: Record<string, { model: string; label: string; when: string; visio
     model: 'moonshotai/kimi-k3',
     label: 'Kimi K3',
     vision: true,
+    // Its output costs ~$10.80 per million tokens, and reasoning is output
+    effort: 'low',
     when: 'Use when the user asks for Kimi, or wants a second opinion from a different model family.',
   },
   glm: {
     model: 'z-ai/glm-5.2',
     label: 'GLM-5.2',
     vision: false,
+    effort: 'medium',
     when: 'Use when the user asks for GLM, or for design and planning work.',
   },
   qwen: {
     model: 'qwen/qwen3.7-flash',
     label: 'Qwen 3.7 Flash',
     vision: true,
+    effort: 'medium',
     when: 'Very low cost ($0.03/$0.13 per million tokens). Use when the user asks for Qwen or the cheap agent, or for tests and simple tasks.',
   },
 }
@@ -39,7 +57,7 @@ const AGENTS: Record<string, { model: string; label: string; when: string; visio
 const OPENROUTER = 'https://openrouter.ai/api/v1'
 // Output room beyond the reasoning budget
 const ANSWER_TOKENS = 12000
-// Reasoning budget per effort level (the Agent call's `effort`, else the session's)
+// Reasoning budget per effort level
 const THINKING_BUDGET: Record<string, number> = { low: 1024, medium: 4000, high: 8000, xhigh: 12000, max: 16000 }
 // Waits before retrying a 429/5xx/network error that came before any output;
 // a hook's sleeps count against its 10 s budget
@@ -106,7 +124,22 @@ type StreamEvent = {
 type ApiBlock = Record<string, unknown> & { type: string }
 type ApiMsg = { role: string; content: ApiBlock[] }
 type ToolDef = { name: string; description: string; input_schema: Record<string, unknown> }
-type CostSoFar = { steps: number; usd: number; providers: Set<string> }
+
+// Every run of our agents, by agentId: kept in session state, so a reload of the
+// plugin mid-run keeps auto-mode delivery, the guards and the totals
+const runsAtom = atom({ plugin: 'openrouter-agents', key: 'runs' } as const, {} as Record<string, AgentRun>, { shape: 'runs-1' })
+
+const newRun = (name: string, isAuto: boolean, effort?: string): AgentRun => ({
+  name,
+  isAuto,
+  ...(effort ? { effort } : {}),
+  toolNames: [],
+  deniedPaths: [],
+  isNudged: false,
+  steps: 0,
+  usd: 0,
+  providers: [],
+})
 
 const num = (v: unknown) => (typeof v === 'number' ? v : 0)
 const usd = (v: number) => `$${v < 0.01 ? v.toFixed(4) : v.toFixed(2)}`
@@ -116,15 +149,39 @@ function addUsage(into: Record<string, number>, from: Record<string, unknown> | 
   for (const k of Object.keys(into)) into[k] = Math.max(into[k] ?? 0, num(from?.[k]))
 }
 
+async function getRun($: EngineInterface, agentId: string): Promise<AgentRun | undefined> {
+  return (await read($, runsAtom))[agentId]
+}
+
+async function patchRun($: EngineInterface, agentId: string, change: (run: AgentRun) => AgentRun) {
+  await update($, runsAtom, runs => {
+    const run = runs[agentId]
+    return run ? { ...runs, [agentId]: change(run) } : runs
+  })
+}
+
+// The run of one of our agents, created on first sight for one spawned before
+// this code loaded (its type still names it); undefined for anyone else's agent
+async function runOf($: EngineInterface, agents: Record<string, AgentDef>, agentId: string) {
+  const run = await getRun($, agentId)
+  if (run) return run
+  const info = (await $.agent.list()).find(a => a.id === agentId)
+  const prefix = `${$.plugin.name}:`
+  const name = info?.type.startsWith(prefix) ? info.type.slice(prefix.length) : ''
+  if (!agents[name]) return undefined
+  const created = newRun(name, false)
+  await update($, runsAtom, runs => (runs[agentId] ? runs : { ...runs, [agentId]: created }))
+  return (await getRun($, agentId)) ?? created
+}
+
 const MODEL_LINE = /You are powered by the model named [^\n]*/
+const HANDBACK_TEXT = /[^\n]*SubagentHandback[^\n]*/g
+const PLAIN_REPORT = 'When your work is complete, write your full final report as your last message, in plain text. It is delivered for you; there is no tool to call for it.'
 
 // What a native subagent's request would carry, adapted for an OpenRouter model:
 // the model-identity reminder names the real model, media the model can't take
 // becomes a note, and the end of the conversation is marked as a cache point.
-const HANDBACK_TEXT = /[^\n]*SubagentHandback[^\n]*/g
-const PLAIN_REPORT = 'When your work is complete, write your full final report as your last message, in plain text. It is delivered for you; there is no tool to call for it.'
-
-function adaptMessages(messages: readonly { role: string; content: readonly unknown[] }[], agent: { model: string; label: string; vision: boolean }, isAuto = false) {
+function adaptMessages(messages: readonly { role: string; content: readonly unknown[] }[], agent: AgentDef, isAuto = false) {
   const identity = `You are powered by the model named ${agent.label}. The exact model ID is ${agent.model}, reached through OpenRouter.`
   const adaptBlock = (b: ApiBlock): ApiBlock => {
     if (b.type === 'text' && typeof b.text === 'string' && MODEL_LINE.test(b.text)) {
@@ -177,6 +234,28 @@ function toolSummary(names: readonly string[]) {
 const REFUSAL = /permission|haven't granted|denied|not allowed|rejected|classifier/i
 const FILE_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_path', Read: 'file_path', NotebookEdit: 'notebook_path' }
 
+// An absolute, normalized path: `~` is home, a relative path is taken from `base`
+function normalizePath(path: string, base: string, home: string) {
+  let p = path
+  if (home && (p === '~' || p.startsWith('~/'))) p = home + p.slice(1)
+  if (!p.startsWith('/')) p = `${base.replace(/\/+$/, '')}/${p}`
+  const parts: string[] = []
+  for (const part of p.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') parts.pop()
+    else parts.push(part)
+  }
+  return `/${parts.join('/')}`
+}
+
+// The paths a shell command may name: each word that looks like a path, taken
+// from the session's folder and from any folder the command `cd`s into
+function pathsInCommand(command: string, cwd: string, home: string) {
+  const bases = [cwd, ...[...command.matchAll(/\bcd\s+("[^"]+"|'[^']+'|[^\s;&|]+)/g)].map(m => normalizePath(m[1]!.replace(/^["']|["']$/g, ''), cwd, home))]
+  const words = command.split(/[\s'"`;|&<>()=]+/).filter(w => w && (w.includes('/') || w.includes('.') || w.startsWith('~')))
+  return new Set(words.flatMap(w => bases.map(b => normalizePath(w, b, home))))
+}
+
 // Adds the no-tool-calls nudge after the last user message's blocks
 function withNudge(messages: ApiMsg[]) {
   const last = messages.at(-1)
@@ -206,41 +285,54 @@ function safeToolId(id: string, index: number) {
   return clean || `toolu_openrouter_${index}`
 }
 
-// Which of our agents runs in a loop, cached per agentId ('' for one that isn't ours)
-async function ownerOf($: EngineInterface, owners: Map<string, string>, agentId: string) {
-  let owner = owners.get(agentId)
-  if (owner === undefined) {
-    const info = (await $.agent.list()).find(a => a.id === agentId)
-    const prefix = `${$.plugin.name}:`
-    owner = info?.type.startsWith(prefix) ? info.type.slice(prefix.length) : ''
-    owners.set(agentId, owner)
+// The agents as configured: each default with its model and effort options
+// applied, plus the free `custom` slot when it names a model
+function configuredAgents(options: Readonly<Record<string, unknown>>) {
+  const opt = (key: string) => (typeof options[key] === 'string' ? (options[key] as string).trim() : '')
+  const agents: Record<string, AgentDef> = {}
+  for (const [name, def] of Object.entries(DEFAULT_AGENTS)) {
+    const model = opt(`${name}Model`) || def.model
+    agents[name] = {
+      ...def,
+      model,
+      effort: opt(`${name}Effort`) || def.effort,
+      // A model other than the default gets no pinned providers and a generic label
+      ...(model === def.model ? {} : { label: model, providers: undefined }),
+    }
   }
-  return owner
+  const customModel = opt('customModel')
+  if (customModel) {
+    const label = opt('customLabel') || customModel
+    agents.custom = {
+      model: customModel,
+      label,
+      vision: true,
+      effort: opt('customEffort') || 'medium',
+      when: `Use when the user asks for ${label}, or for the custom agent.`,
+    }
+  }
+  return agents
 }
 
 export const register: Register = (on, options) => {
   const lowBalanceUsd = Number(options.lowBalanceUsd ?? 5)
   const autoMode = String(options.autoMode ?? 'refuse')
-  // Our agents spawned in auto mode, and the final report each wrote
-  const autoAgents = new Set<string>()
-  const reports = new Map<string, string>()
-  // Tool calls each of our agents has made, and the auto-mode agents already nudged
-  const toolCalls = new Map<string, number>()
-  const toolNames = new Map<string, string[]>()
-  // agentId -> paths a file tool was refused for; Bash may not touch them either
-  const deniedPaths = new Map<string, Set<string>>()
-  const nudged = new Set<string>()
+  const agents = configuredAgents(options)
+  // The session's folder and home, for the path guard (set again on a reload's session.start)
+  let cwd = ''
+  let home = ''
   // The agent whose transcript is on screen (from AbovePrompt's `view`), for the model notice
   let viewed: string | undefined
-  // agentId -> our agent name, or '' for subagents that aren't ours
-  const owners = new Map<string, string>()
-  const costs = new Map<string, CostSoFar>()
+  // Agent tool_use_id -> the effort the call named, until its spawn picks it up
+  const pendingEffort = new Map<string, string>()
   // `${turnId}:${step}` -> highest content block index yielded, for the error handler
   const lastBlock = new Map<string, number>()
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    for (const [name, a] of Object.entries(AGENTS)) {
+    cwd = e.cwd
+    home = (await $.env.get('HOME')) ?? ''
+    for (const [name, a] of Object.entries(agents)) {
       await $.agent.register({
         name,
         description: `Subagent on ${a.label} via OpenRouter. ${a.when}`,
@@ -249,15 +341,30 @@ export const register: Register = (on, options) => {
       })
     }
 
-    // Balance check in the background, so a slow OpenRouter never holds up the session
+    // In the background, so a slow OpenRouter never holds up the session: check the
+    // configured models exist and whether they take images, and the balance
     void (async () => {
       const key = await $.env.get('OPENROUTER_API_KEY')
-      if (!key || !(lowBalanceUsd > 0)) return
+      if (!key) return
       const headers = { authorization: `Bearer ${key}` }
-      const [credits, keyInfo] = await Promise.all([
+      const [models, credits, keyInfo] = await Promise.all([
+        $.http.fetch(`${OPENROUTER}/models`, { headers }),
         $.http.fetch(`${OPENROUTER}/credits`, { headers }),
         $.http.fetch(`${OPENROUTER}/key`, { headers }),
       ])
+      if (models.ok) {
+        const listed = new Map(
+          (JSON.parse(models.text).data as { id: string; architecture?: { input_modalities?: string[] } }[]).map(m => [m.id, m]),
+        )
+        const missing: string[] = []
+        for (const [name, a] of Object.entries(agents)) {
+          const m = listed.get(a.model)
+          if (!m) missing.push(`${name} (${a.model})`)
+          else if (m.architecture?.input_modalities) a.vision = m.architecture.input_modalities.includes('image')
+        }
+        if (missing.length) $.ui.toast(`OpenRouter has no model for: ${missing.join(', ')}. Check /plugin configure.`)
+      }
+      if (!(lowBalanceUsd > 0)) return
       const c = credits.ok ? JSON.parse(credits.text).data : undefined
       const k = keyInfo.ok ? JSON.parse(keyInfo.text).data : undefined
       const left = [
@@ -274,13 +381,17 @@ export const register: Register = (on, options) => {
     return started
   })
 
+  // Hooks below that only add to an event fail open (`.catch(... => next(e))`):
+  // a state read that fails lets the spawn, notice or tool call go on as usual.
+
   // Auto mode's safety check runs server-side on Anthropic's responses. Steps
   // OpenRouter answered carry no verdict, so it refuses every tool call these
   // agents make, prompts included. By default refuse the spawn; with
   // `autoMode: allow` run them unreviewed (see tool.check and the report hooks).
   on('agent.spawn', async ($, e, next) => {
     const name = e.subagentType.startsWith(`${$.plugin.name}:`) ? e.subagentType.slice($.plugin.name.length + 1) : ''
-    const isAuto = AGENTS[name] !== undefined && e.permissionMode === 'auto'
+    const agent = agents[name]
+    const isAuto = agent !== undefined && e.permissionMode === 'auto'
     if (isAuto && autoMode !== 'allow') {
       return {
         deny:
@@ -291,89 +402,99 @@ export const register: Register = (on, options) => {
     }
     // Naming the OpenRouter model makes Claude Code label the subagent and its
     // messages with it. No request goes out under that name: turn.step answers them all.
-    const spawned = await next(AGENTS[name] ? { ...e, model: AGENTS[name]!.model } : e)
-    if (AGENTS[name] && 'agentId' in spawned && spawned.agentId) {
-      owners.set(spawned.agentId, name)
-      if (isAuto) autoAgents.add(spawned.agentId)
+    const spawned = await next(agent ? { ...e, model: agent.model } : e)
+    if (agent && 'agentId' in spawned && spawned.agentId) {
+      const effort = pendingEffort.get(e.tool_use_id)
+      pendingEffort.delete(e.tool_use_id)
+      const id = spawned.agentId
+      await update($, runsAtom, runs => ({ ...runs, [id]: newRun(name, isAuto, effort) }))
     }
     return spawned
-  })
+  }).catch(($, e, next) => next(e))
 
   // In auto mode, what the classifier would have reviewed is allowed. Deny rules
   // and anything core decides outright still stand.
   on('tool.check', async ($, e, next) => {
-    const ours = e.agentId !== undefined && AGENTS[owners.get(e.agentId) ?? ''] !== undefined
+    const run = e.agentId !== undefined ? await runOf($, agents, e.agentId) : undefined
     // In auto mode the labelled report is the only way results reach the main
     // session; SendMessage would carry them there unlabelled
-    if (ours && autoAgents.has(e.agentId!) && e.tool === 'SendMessage') {
+    if (run?.isAuto && e.tool === 'SendMessage') {
       return { decision: 'deny' as const, reason: 'SendMessage is off for OpenRouter subagents in auto mode. Put everything in your final report.' }
     }
-    // A path a file tool was refused for stays off limits through Bash too
-    if (ours && e.tool === 'Bash') {
+    // A path a file tool was refused for stays off limits through Bash too,
+    // however the command spells it (relative, ~/…, after a cd)
+    if (run && run.deniedPaths.length && e.tool === 'Bash') {
       const command = String((e.input as { command?: unknown } | undefined)?.command ?? '')
-      const hit = [...(deniedPaths.get(e.agentId!) ?? [])].find(path => command.includes(path))
+      const named = pathsInCommand(command, cwd, home)
+      const hit = run.deniedPaths.find(path => named.has(path) || command.includes(path))
       if (hit) {
         return { decision: 'deny' as const, reason: `${hit} was refused to a file tool earlier in this run; reaching it through Bash isn't allowed either. Say in your report what was refused.` }
       }
     }
     const verdict = await next(e)
-    if (e.agentId === undefined || !autoAgents.has(e.agentId) || verdict.decision !== 'ask') return verdict
+    if (!run?.isAuto || verdict.decision !== 'ask') return verdict
     return { decision: 'allow' as const, reason: `${$.plugin.name}: auto mode can't review OpenRouter subagents; allowed unreviewed (autoMode: allow)` }
   }).catch(($, e, next) => (next.called ? next(e) : { decision: 'deny' as const, reason: 'openrouter-agents: permission check failed' }))
 
   // Deliver an auto-mode agent's report: the completion notice for a background
   // run, and the Agent tool's result for a foreground one, say no report came.
-  const reportFor = (agentId: string) => {
-    const report = reports.get(agentId)
-    if (report === undefined) return undefined
-    const label = AGENTS[owners.get(agentId) ?? '']?.label ?? 'OpenRouter subagent'
-    return `[Report from ${label} via OpenRouter, delivered by the openrouter-agents plugin. Auto mode did not review this report or the work behind it. ${toolSummary(toolNames.get(agentId) ?? [])}]\n\n${report}`
+  const reportFor = (run: AgentRun) => {
+    const label = agents[run.name]?.label ?? 'OpenRouter subagent'
+    return `[Report from ${label} via OpenRouter, delivered by the openrouter-agents plugin. Auto mode did not review this report or the work behind it. ${toolSummary(run.toolNames)}]\n\n${run.report}`
   }
 
   on('prompt.submit', async ($, e, next) => {
     const id = /<task-id>([^<]+)<\/task-id>/.exec(e.text)?.[1]
-    const text = id && autoAgents.has(id) ? reportFor(id) : undefined
-    if (!id || text === undefined || !e.text.includes('<result>')) return next(e)
-    reports.delete(id)
+    if (!id || !e.text.includes('<result>')) return next(e)
+    const run = await getRun($, id)
+    if (!run?.isAuto || run.report === undefined) return next(e)
+    const text = reportFor(run)
+    await patchRun($, id, r => ({ ...r, report: undefined }))
     return next({ ...e, text: e.text.replace(/<result>[\s\S]*?<\/result>/, () => `<result>${text}</result>`) })
-  })
+  }).catch(($, e, next) => next(e))
 
+  // Record paths a file tool was refused for, as absolute paths
   on('tool.call', async ($, e, next) => {
     const r = await next(e)
     const key = FILE_TOOLS[e.tool]
-    if (!key || e.agentId === undefined || !AGENTS[owners.get(e.agentId) ?? '']) return r
+    if (!key || e.agentId === undefined) return r
     const refused = r.deny !== undefined || (r.isError === true && REFUSAL.test(r.text ?? ''))
     const path = (e as unknown as Record<string, unknown>)[key]
-    if (refused && typeof path === 'string' && path) {
-      const set = deniedPaths.get(e.agentId) ?? new Set<string>()
-      set.add(path)
-      deniedPaths.set(e.agentId, set)
-    }
+    if (!refused || typeof path !== 'string' || !path) return r
+    if (!(await runOf($, agents, e.agentId))) return r
+    const absolute = normalizePath(path, cwd, home)
+    await patchRun($, e.agentId, run => (run.deniedPaths.includes(absolute) ? run : { ...run, deniedPaths: [...run.deniedPaths, absolute] }))
     return r
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    // The spawn doesn't carry the call's effort; hand it over by the call's id
+    const named = e.subagent_type?.startsWith(`${$.plugin.name}:`) ? e.subagent_type.slice($.plugin.name.length + 1) : ''
+    if (agents[named] && e.effort) pendingEffort.set(e.tool_use_id, e.effort)
     const r = await next(e)
+    pendingEffort.delete(e.tool_use_id)
     const result = r.result as { status?: string; agentId?: string; content?: unknown } | undefined
     if (r.deny !== undefined || r.isError || result?.status !== 'completed' || !result.agentId) return r
-    const text = autoAgents.has(result.agentId) ? reportFor(result.agentId) : undefined
-    if (text === undefined) return r
-    reports.delete(result.agentId)
+    const run = await getRun($, result.agentId)
+    if (!run?.isAuto || run.report === undefined) return r
+    const text = reportFor(run)
+    await patchRun($, result.agentId, x => ({ ...x, report: undefined }))
     return { result: { ...result, content: [{ type: 'text' as const, text }] } as typeof r.result }
-  })
+  }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) return yield* next(e)
     const agentId = e.agentId
-    const owner = await ownerOf($, owners, agentId)
-    const agent = AGENTS[owner]
-    if (!agent) return yield* next(e)
+    const run = await runOf($, agents, agentId)
+    const agent = run ? agents[run.name] : undefined
+    if (!run || !agent) return yield* next(e)
+    const owner = run.name
     const stepKey = `${e.turnId}:${e.index}`
+    const providers = new Set(run.providers)
+    let stepCost = 0
 
-    const cost = costs.get(agentId) ?? { steps: 0, usd: 0, providers: new Set<string>() }
-    costs.set(agentId, cost)
     const showStatus = (what: string) =>
-      $.ui.status(`${owner} · ${agent.label}: ${what} · ${cost.steps} step${cost.steps === 1 ? '' : 's'} · ${usd(cost.usd)}`)
+      $.ui.status(`${owner} · ${agent.label}: ${what} · ${run.steps} step${run.steps === 1 ? '' : 's'} · ${usd(run.usd + stepCost)}`)
 
     const done = (answer: string, stopReason: TurnStopReason, usage: TurnUsage | null, toolUses: TurnStepToolUse[] = []): TurnStepResult =>
       ({ turnId: e.turnId, index: e.index, answer, toolUses, stopReason, usage })
@@ -386,7 +507,7 @@ export const register: Register = (on, options) => {
       return done(text, stopReason, null)
     }
 
-    const isAuto = autoAgents.has(agentId)
+    const isAuto = run.isAuto
     const key = await $.env.get('OPENROUTER_API_KEY')
     if (!key) return yield* fail('OPENROUTER_API_KEY is not set in the environment claude started from')
 
@@ -396,13 +517,10 @@ export const register: Register = (on, options) => {
     // In auto mode the engine keeps asking for a SubagentHandback the classifier
     // would have to approve. The report is already kept; answer without a request.
     const lastUser = [...messages].reverse().find(m => m.role === 'user')
-    const isReminder = isAuto && reports.has(agentId) && JSON.stringify(lastUser?.content ?? '').includes(HANDBACK_REMINDER)
+    const isReminder = isAuto && run.report !== undefined && JSON.stringify(lastUser?.content ?? '').includes(HANDBACK_REMINDER)
     // A report with no tool calls behind it gets one chance to do the work first
-    const nudge = isReminder && !toolCalls.get(agentId) && !nudged.has(agentId)
-    if (nudge) {
-      nudged.add(agentId)
-      reports.delete(agentId)
-    }
+    const nudge = isReminder && !run.toolNames.length && !run.isNudged
+    if (nudge) await patchRun($, agentId, r => ({ ...r, isNudged: true, report: undefined }))
     if (isReminder && !nudge) {
       const text = REMINDER_REPLY
       yield { kind: 'text' as const, index: 0, text }
@@ -418,13 +536,19 @@ export const register: Register = (on, options) => {
     const loaded: ToolDef[] = loadedTools(messages)
       .filter(name => !offered.has(name))
       .map(name => ({ name, description: session.find(t => t.name === name)?.description ?? name, input_schema: TOOL_SCHEMAS[name]! }))
-    const tools = isAuto ? [...direct, ...loaded] : [...direct, ...loaded, HANDBACK_TOOL]
+    // Claude Code gives a subagent SubagentHandback only in some sessions, and says so
+    // in a reminder; offer it exactly then (never in auto mode, where only the
+    // classifier may allow it)
+    const engineOffersHandback = JSON.stringify(messages).includes('delivered through SubagentHandback')
+    const tools = !isAuto && engineOffersHandback ? [...direct, ...loaded, HANDBACK_TOOL] : [...direct, ...loaded]
     // Environment, date, CLAUDE.md and the rest arrive in the messages, as for a
     // native subagent; the system prompt is the agent definition's own.
     // Tools come before it in the cached prefix, so its mark covers them too.
     // (A mark on a tool itself made DeepSeek's provider drop that tool.)
     const system = [{ type: 'text', text: SUBAGENT_PROMPT + (isAuto ? AUTO_REPORT_RULE : ''), cache_control: { type: 'ephemeral' } }]
-    const budget = typeof e.effort === 'number' ? e.effort : (THINKING_BUDGET[e.effort ?? 'medium'] ?? 4000)
+    // The Agent call's own effort, else the agent's configured one
+    const effort = run.effort ?? agent.effort
+    const budget = THINKING_BUDGET[effort] ?? THINKING_BUDGET.medium!
     const body = JSON.stringify({
       model: agent.model,
       ...(agent.providers ? { provider: { order: agent.providers, allow_fallbacks: true } } : {}),
@@ -439,7 +563,6 @@ export const register: Register = (on, options) => {
     let answer = ''
     let stopReason: TurnStopReason = null
     let replyModel = agent.model
-    let stepCost = 0
     const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
     const toolUses: TurnStepToolUse[] = []
     // Per content block: its tool call (if any) and the argument JSON so far
@@ -501,7 +624,7 @@ export const register: Register = (on, options) => {
           for (const ev of events.splice(0)) {
             if (ev.type === 'message_start') {
               replyModel = ev.message?.model ?? replyModel
-              if (ev.message?.provider) cost.providers.add(ev.message.provider)
+              if (ev.message?.provider) providers.add(ev.message.provider)
               addUsage(usage, ev.message?.usage)
             } else if (ev.type === 'content_block_start' && ev.index !== undefined) {
               const cb = ev.content_block
@@ -595,29 +718,30 @@ export const register: Register = (on, options) => {
     } catch (err) {
       return yield* fail(String(err).slice(0, 300))
     } finally {
-      cost.steps++
-      cost.usd += stepCost
-      showStatus('waiting on tools')
+      await patchRun($, agentId, r => ({ ...r, steps: r.steps + 1, usd: r.usd + stepCost, providers: [...providers] }))
+      $.ui.status(`${owner} · ${agent.label}: waiting on tools · ${run.steps + 1} step${run.steps === 0 ? '' : 's'} · ${usd(run.usd + stepCost)}`)
     }
 
     const turnUsage: TurnUsage = { ...usage, model: replyModel }
     stopReason ??= toolUses.length ? 'tool_use' : 'end_turn'
-    toolCalls.set(agentId, (toolCalls.get(agentId) ?? 0) + toolUses.length)
-    toolNames.set(agentId, [...(toolNames.get(agentId) ?? []), ...toolUses.map(t => t.name)])
-    if (isAuto && handbackReport) reports.set(agentId, handbackReport)
-    else if (isAuto && !toolUses.length && answer.trim()) reports.set(agentId, answer.trim())
+    const report = isAuto ? (handbackReport ?? (!toolUses.length && answer.trim() ? answer.trim() : undefined)) : undefined
+    await patchRun($, agentId, r => ({
+      ...r,
+      toolNames: [...r.toolNames, ...toolUses.map(t => t.name)],
+      ...(report !== undefined ? { report } : {}),
+    }))
     lastBlock.delete(stepKey)
     yield { kind: 'stop' as const, stopReason, usage: turnUsage }
     return done(answer, stopReason, turnUsage, toolUses)
   }).catch(async function* ($, e, next) {
     // Without this, a failed step is finished by the engine's own model (the
     // session's Opus) without a word. For our agents, end the step with the error.
-    const owner = e.agentId !== undefined ? owners.get(e.agentId) : undefined
-    if (!owner || !AGENTS[owner]) return yield* next(e)
+    const run = e.agentId !== undefined ? await getRun($, e.agentId) : undefined
+    if (!run || !agents[run.name]) return yield* next(e)
     const stepKey = `${e.turnId}:${e.index}`
     const index = (lastBlock.get(stepKey) ?? -1) + 1
     lastBlock.delete(stepKey)
-    const text = `[${owner} via OpenRouter: this step failed inside the openrouter-agents plugin. Stop and report what you have.]`
+    const text = `[${run.name} via OpenRouter: this step failed inside the openrouter-agents plugin. Stop and report what you have.]`
     yield { kind: 'text' as const, index, text }
     yield { kind: 'stop' as const, stopReason: 'end_turn' as const, usage: null }
     return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn' as const, usage: null }
@@ -626,35 +750,31 @@ export const register: Register = (on, options) => {
   // A subagent's run ends: put its OpenRouter total in the transcript
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    const cost = e.agentId !== undefined ? costs.get(e.agentId) : undefined
-    if (cost && e.agentId !== undefined) {
-      const owner = owners.get(e.agentId) ?? ''
+    const run = e.agentId !== undefined ? await getRun($, e.agentId) : undefined
+    if (run && run.steps > 0) {
       $.ui.status(undefined)
-      const served = cost.providers.size ? ` (served by ${[...cost.providers].join(', ')})` : ''
-      $.ui.log(`${owner} · ${AGENTS[owner]?.label ?? ''} via OpenRouter${served}: ${cost.steps} steps, ${usd(cost.usd)}`)
-      costs.delete(e.agentId)
+      const served = run.providers.length ? ` (served by ${run.providers.join(', ')})` : ''
+      $.ui.log(`${run.name} · ${agents[run.name]?.label ?? ''} via OpenRouter${served}: ${run.steps} steps, ${usd(run.usd)}`)
     }
     return result
   })
 
   // Opening one of our agents' transcripts shows the session's model in the
   // header notice. Name the real one there and in the band above the prompt.
-  const viewedAgent = () => (viewed !== undefined ? AGENTS[owners.get(viewed) ?? ''] : undefined)
-
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const id = e.props.view.agentId
     if (id !== viewed) {
       viewed = id
-      if (id !== undefined) await ownerOf($, owners, id)
       $.ui.invalidate('ui.render')
     }
-    const agent = viewedAgent()
-    if (!agent) return next(e)
+    const run = id !== undefined ? (await read($, runsAtom))[id] : undefined
+    const agent = run ? agents[run.name] : undefined
+    if (!run || !agent) return next(e)
     const { Box, Text } = $.ui.resolve(e)
     return (
       <Box>
         <Text dimColor>
-          {owners.get(viewed!)} · {agent.label} ({agent.model}) via OpenRouter
+          {run.name} · {agent.label} ({agent.model}) via OpenRouter
         </Text>
       </Box>
     )
@@ -669,21 +789,15 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'InfoNotice' }, async ($, e, next) => {
-    const agent = viewedAgent()
+    const run = viewed !== undefined ? (await read($, runsAtom))[viewed] : undefined
+    const agent = run ? agents[run.name] : undefined
     if (!agent || !/^Using .+ \(from /.test(e.props.text)) return next(e)
     const { Text } = $.ui.resolve(e)
     return <Text dimColor>Using {agent.label} ({agent.model}) via OpenRouter · this subagent</Text>
   })
 
   on('session.end', async ($, e, next) => {
-    owners.clear()
-    costs.clear()
-    autoAgents.clear()
-    reports.clear()
-    toolCalls.clear()
-    nudged.clear()
-    toolNames.clear()
-    deniedPaths.clear()
+    pendingEffort.clear()
     lastBlock.clear()
     return next(e)
   })

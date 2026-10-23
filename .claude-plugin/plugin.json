@@ -1,6 +1,6 @@
 {
   "name": "openrouter-agents",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "description": "Native Agent-tool subagent types (deepseek, kimi, glm) whose model requests go to OpenRouter",
   "license": "MIT",
   "userConfig": {
@@ -19,6 +19,108 @@
         "allow"
       ],
       "default": "refuse"
+    },
+    "deepseekModel": {
+      "type": "string",
+      "title": "deepseek: OpenRouter model",
+      "description": "OpenRouter model ID behind the deepseek agent.",
+      "default": "deepseek/deepseek-v4.1-flash-1017"
+    },
+    "deepseekEffort": {
+      "type": "string",
+      "title": "deepseek: reasoning effort",
+      "description": "Reasoning budget when the Agent call names no effort.",
+      "options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "medium"
+    },
+    "kimiModel": {
+      "type": "string",
+      "title": "kimi: OpenRouter model",
+      "description": "OpenRouter model ID behind the kimi agent.",
+      "default": "moonshotai/kimi-k3"
+    },
+    "kimiEffort": {
+      "type": "string",
+      "title": "kimi: reasoning effort",
+      "description": "Reasoning budget when the Agent call names no effort.",
+      "options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "low"
+    },
+    "glmModel": {
+      "type": "string",
+      "title": "glm: OpenRouter model",
+      "description": "OpenRouter model ID behind the glm agent.",
+      "default": "z-ai/glm-5.2"
+    },
+    "glmEffort": {
+      "type": "string",
+      "title": "glm: reasoning effort",
+      "description": "Reasoning budget when the Agent call names no effort.",
+      "options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "medium"
+    },
+    "qwenModel": {
+      "type": "string",
+      "title": "qwen: OpenRouter model",
+      "description": "OpenRouter model ID behind the qwen agent.",
+      "default": "qwen/qwen3.7-flash"
+    },
+    "qwenEffort": {
+      "type": "string",
+      "title": "qwen: reasoning effort",
+      "description": "Reasoning budget when the Agent call names no effort.",
+      "options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "medium"
+    },
+    "customModel": {
+      "type": "string",
+      "title": "custom: OpenRouter model",
+      "description": "Any OpenRouter model ID; when set, an openrouter-agents:custom agent runs on it. Leave empty to turn it off.",
+      "default": ""
+    },
+    "customLabel": {
+      "type": "string",
+      "title": "custom: display name",
+      "description": "What the custom agent is called in its description and labels; empty uses the model ID.",
+      "default": ""
+    },
+    "customEffort": {
+      "type": "string",
+      "title": "custom: reasoning effort",
+      "description": "Reasoning budget when the Agent call names no effort.",
+      "options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "medium"
     }
-  }
+  },
+  "types": "./types/index.d.ts"
 }

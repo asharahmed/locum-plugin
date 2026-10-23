@@ -6,7 +6,13 @@ They are native subagents: the Agent tool starts them, their tool calls run and 
 
 ## Setup
 
-`OPENROUTER_API_KEY` must be in the environment `claude` starts from. Options (in `/plugin configure`): `lowBalanceUsd` (default 5) sets when a low-balance notice appears at session start, 0 turns it off; `autoMode` (`refuse` or `allow`, default `refuse`) decides whether these agents run in auto mode.
+`OPENROUTER_API_KEY` must be in the environment `claude` starts from. Options (in `/plugin configure`):
+- `lowBalanceUsd` (default 5): a low-balance notice appears at session start below this; 0 turns it off.
+- `autoMode` (`refuse` or `allow`, default `refuse`): whether these agents run in auto mode.
+- `<agent>Model` and `<agent>Effort` for deepseek, kimi, glm and qwen: the OpenRouter model behind each, and its reasoning effort when the Agent call names none (defaults: medium; kimi low, since its output is expensive). A model other than the default loses DeepSeek's provider pin and is labelled by its ID.
+- `customModel`, `customLabel`, `customEffort`: a free slot. Set `customModel` to any OpenRouter model ID and an `openrouter-agents:custom` agent runs on it.
+
+At session start the plugin checks each configured model against OpenRouter's model list (a notice names any that don't exist) and reads whether it takes images.
 
 ## What you see
 
@@ -38,3 +44,7 @@ Disable with `/plugin` or `claude plugin disable openrouter-agents@ashar-local`;
 - In auto mode SendMessage is refused for these agents, so results reach the main session only through the labelled report.
 - In any mode, once Write, Edit, NotebookEdit or Read is refused for a path, a Bash command that names that path is refused too.
 - DeepSeek is pinned to DeepInfra, then Cloudflare (both cache prompts), with OpenRouter's other providers as fallback. The end-of-run line names the providers that served the run.
+
+## State (0.6.6)
+
+What the plugin tracks per run (auto mode, the report waiting for delivery, tool calls, refused paths, cost, providers) lives in session state, declared in `types/index.d.ts`, so a `/reload-plugins` during a run keeps it. The path guard resolves relative paths, `~/` and folders a command `cd`s into. SubagentHandback is offered only when Claude Code's own reminder says the subagent has it.

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import { RETRYABLE, end, engine, sse, start, step, text, toolUse } from './helpers'
 
 test('a Kimi-style tool id is cleaned, and the call streams through', async ($, on) => {
-  engine(on, [sse([start(), ...toolUse(0, 'functions.Bash:0', 'Bash', { command: 'echo hi' }), ...end('tool_use')])], 'openrouter-agents:kimi')
+  engine(on, [sse([start(), ...toolUse(0, 'functions.Bash:0', 'Bash', { command: 'echo hi' }), ...end('tool_use')])], 'locum:kimi')
   const { chunks, result } = await step($)
   const tool = chunks.find(c => c.kind === 'tool')
   expect(tool.id).toMatch(/^[A-Za-z0-9_-]+$/)
@@ -73,7 +73,7 @@ test('a low balance gets the top-up message and no fallback', async ($, on) => {
 })
 
 test('a fallback setting equal to the agent\'s own model moves on to the next model', { options: { fallbackModel: 'deepseek/deepseek-v4.1-flash-1017' } }, async ($, on) => {
-  const requests = engine(on, [RETRYABLE, RETRYABLE, RETRYABLE, sse([start(), ...text(0, 'ok'), ...end('end_turn')])], 'openrouter-agents:deepseek')
+  const requests = engine(on, [RETRYABLE, RETRYABLE, RETRYABLE, sse([start(), ...text(0, 'ok'), ...end('end_turn')])], 'locum:deepseek')
   const pending = step($)
   await requests.clock.settle()
   await requests.clock.advance(1000)
@@ -87,7 +87,7 @@ test('a fallback setting equal to the agent\'s own model moves on to the next mo
 const CREDIT_CHECK = '{"error":{"message":"OpenRouter could not verify available credits for this request in time. Retry shortly."}}\n__STATUS__429\n'
 
 test('a credit-check failure is retried with a lower output cap', async ($, on) => {
-  const requests = engine(on, [CREDIT_CHECK, sse([start(), ...text(0, 'passed the check'), ...end('end_turn')])], 'openrouter-agents:kimi')
+  const requests = engine(on, [CREDIT_CHECK, sse([start(), ...text(0, 'passed the check'), ...end('end_turn')])], 'locum:kimi')
   const pending = step($)
   await requests.clock.settle()
   await requests.clock.advance(1000)
@@ -100,7 +100,7 @@ test('a credit-check failure is retried with a lower output cap', async ($, on) 
 })
 
 test('a credit check that never passes ends with the low-balance advice', async ($, on) => {
-  const requests = engine(on, [CREDIT_CHECK], 'openrouter-agents:kimi')
+  const requests = engine(on, [CREDIT_CHECK], 'locum:kimi')
   const pending = step($)
   for (const ms of [1000, 2000, 1000, 2000]) {
     await requests.clock.settle()
@@ -132,6 +132,6 @@ test('a model that keeps failing is skipped for a while, so steps go straight to
   expect(requests.length).toBe(13)
   expect(JSON.parse(requests[12]!).model).toBe('deepseek/deepseek-v4.1-flash-1017')
   expect(result.answer).toBe('fallback answer')
-  const out: any = await $.command.run({ command: 'openrouter', args: '' } as never)
+  const out: any = await $.command.run({ command: 'locum', args: '' } as never)
   expect(String(out.text)).toMatch(/deepseek\/deepseek-v4-flash-0731: 0 steps · 3 failed steps .*skipped for \d+s more/)
 })

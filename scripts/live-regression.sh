@@ -43,22 +43,22 @@ check() {
 }
 
 none='{}'
-allow='{"pluginConfigs":{"openrouter-agents@ashar-local":{"options":{"autoMode":"allow"}}}}'
-refuse='{"pluginConfigs":{"openrouter-agents@ashar-local":{"options":{"autoMode":"refuse"}}}}'
-capped='{"pluginConfigs":{"openrouter-agents@ashar-local":{"options":{"maxRunUsd":0.00001}}}}'
-noZdr='{"pluginConfigs":{"openrouter-agents@ashar-local":{"options":{"customModel":"qwen/qwen3.7-flash"}}}}'
+allow='{"pluginConfigs":{"locum@ashar-local":{"options":{"autoMode":"allow"}}}}'
+refuse='{"pluginConfigs":{"locum@ashar-local":{"options":{"autoMode":"refuse"}}}}'
+capped='{"pluginConfigs":{"locum@ashar-local":{"options":{"maxRunUsd":0.00001}}}}'
+noZdr='{"pluginConfigs":{"locum@ashar-local":{"options":{"customModel":"qwen/qwen3.7-flash"}}}}'
 
-task() { echo "Use the Agent tool with subagent_type \"openrouter-agents:$1\" and prompt \"In $work/$1 write calc.py with add(a, b) and mul(a, b) and asserts for both in a __main__ block that print ok, run it with python3, fix any failure, and report the output.\" Then reply with its report."; }
+task() { echo "Use the Agent tool with subagent_type \"locum:$1\" and prompt \"In $work/$1 write calc.py with add(a, b) and mul(a, b) and asserts for both in a __main__ block that print ok, run it with python3, fix any failure, and report the output.\" Then reply with its report."; }
 
 echo "== running scenarios in parallel (a few minutes)"
 for a in deepseek kimi glm cheap; do run "$a" acceptEdits "$none" -- "$(task "$a")" & done
-run auto auto "$allow" -- "Use the Agent tool with subagent_type \"openrouter-agents:cheap\" and prompt \"Use Bash to run: echo auto-ok. Report the output.\" When it finishes, reply with the exact report you received, including the bracketed note." &
-run refused auto "$refuse" -- 'Use the Agent tool with subagent_type "openrouter-agents:cheap" and prompt "Reply: ok". Report exactly what the Agent tool returned.' &
+run auto auto "$allow" -- "Use the Agent tool with subagent_type \"locum:cheap\" and prompt \"Use Bash to run: echo auto-ok. Report the output.\" When it finishes, reply with the exact report you received, including the bracketed note." &
+run refused auto "$refuse" -- 'Use the Agent tool with subagent_type "locum:cheap" and prompt "Reply: ok". Report exactly what the Agent tool returned.' &
 run main acceptEdits "$none" --model deepseek/deepseek-v4.1-flash-1017 -- "Write $work/main/hello.py that prints hello, run it with python3, and tell me the output and which model you are." &
-run cap acceptEdits "$capped" -- 'Use the Agent tool with subagent_type "openrouter-agents:cheap" and prompt "Use Bash to run: echo one. Then use Bash to run: echo two. Report both." Then reply with its report.' &
-run privacy acceptEdits "$noZdr" -- 'Use the Agent tool with subagent_type "openrouter-agents:custom" and prompt "Reply: ok". Report exactly what the agent returned.' &
-run guard acceptEdits "$none" -- "Use the Agent tool with subagent_type \"openrouter-agents:cheap\" and prompt \"Step 1: use Write to create $HOME/Downloads/or-guard-check.txt containing x. Step 2, whatever happened: use Bash to run exactly: ls -la ~/Downloads/or-guard-check.txt. Report what each tool returned.\" Then reply with its report." &
-run command acceptEdits "$none" -- "/openrouter" &
+run cap acceptEdits "$capped" -- 'Use the Agent tool with subagent_type "locum:cheap" and prompt "Use Bash to run: echo one. Then use Bash to run: echo two. Report both." Then reply with its report.' &
+run privacy acceptEdits "$noZdr" -- 'Use the Agent tool with subagent_type "locum:custom" and prompt "Reply: ok". Report exactly what the agent returned.' &
+run guard acceptEdits "$none" -- "Use the Agent tool with subagent_type \"locum:cheap\" and prompt \"Step 1: use Write to create $HOME/Downloads/or-guard-check.txt containing x. Step 2, whatever happened: use Bash to run exactly: ls -la ~/Downloads/or-guard-check.txt. Report what each tool returned.\" Then reply with its report." &
+run command acceptEdits "$none" -- "/locum" &
 wait
 
 for a in deepseek kimi glm cheap; do
@@ -74,7 +74,7 @@ check "main session on OpenRouter" "$([ "$out" = hello ] && [ "$(all_leaks main)
 check "run spend cap" "$(result cap | grep -q -i 'spend cap' && echo 1 || echo 0)" "(run stopped at the cap)"
 check "privacy setting" "$(result privacy | grep -q 'meets the privacy setting' && echo 1 || echo 0)" "(model without zero-retention providers refused)"
 check "path guard" "$(grep -q 'was refused to a file tool' "$work/guard/out.jsonl" && [ ! -e "$HOME/Downloads/or-guard-check.txt" ] && echo 1 || echo 0)" "(refused path refused to Bash)"
-check "/openrouter" "$(result command | grep -q 'Agents:' && echo 1 || echo 0)" "(overview shown)"
+check "/locum" "$(result command | grep -q 'Agents:' && echo 1 || echo 0)" "(overview shown)"
 
 # Compaction across resumes, on an OpenRouter main session
 M=deepseek/deepseek-v4.1-flash-1017

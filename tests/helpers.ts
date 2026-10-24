@@ -32,7 +32,7 @@ export const TASK = [{ role: 'user', content: [{ type: 'text', text: 'Do the tas
 
 const BASH = [{ name: 'Bash', description: 'Run a command', mcp: false }]
 
-export function engine(on: any, replies: string[], type = 'openrouter-agents:cheap', messages: object[] = TASK, store: Record<string, unknown> = {}, tools: object[] = BASH, sessionModel = 'claude-opus-5-5') {
+export function engine(on: any, replies: string[], type = 'locum:cheap', messages: object[] = TASK, store: Record<string, unknown> = {}, tools: object[] = BASH, sessionModel = 'claude-opus-5-5') {
   const clock = mock.clock(on)
   mock.store(on, store)
   mock.env(on, {
@@ -70,7 +70,7 @@ export const RETRYABLE = '{"error":{"message":"upstream overloaded"}}\n__STATUS_
 // Session start's calls: agent and command registration, and the model list
 export function sessionStart(on: any, models: object[] = []) {
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
-  on('agent.register', (_$: unknown, e: { name: string }) => ({ value: { agent: `openrouter-agents:${e.name}` } }))
+  on('agent.register', (_$: unknown, e: { name: string }) => ({ value: { agent: `locum:${e.name}` } }))
   on('command.register', (_$: unknown, e: { name: string }) => ({ value: { command: e.name } }))
   on('http.fetch', (_$: unknown, e: { url: string }) => ({
     value: e.url.endsWith('/models')

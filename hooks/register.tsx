@@ -73,7 +73,7 @@ export const register: Register = (on, options) => {
   let mainModel = ''
   // Claude Code's own system prompt for each model, as prompt.compose rendered it
   const composed = new Map<string, string>()
-  // Each model's record this session, for skipping one that keeps failing and for /openrouter
+  // Each model's record this session, for skipping one that keeps failing and for /locum
   const health = new Map<string, Health>()
   const healthOf = (model: string) => {
     let h = health.get(model)
@@ -113,7 +113,7 @@ export const register: Register = (on, options) => {
     const started = await next(e)
     cwd = e.cwd
     home = (await $.env.get('HOME')) ?? ''
-    // Models chosen with `/openrouter use` win over the configured ones
+    // Models chosen with `/locum use` win over the configured ones
     applyOverrides(settings, await readOverrides($).catch(() => ({})))
     for (const [name, a] of Object.entries(agents)) {
       await $.agent.register({
@@ -123,7 +123,7 @@ export const register: Register = (on, options) => {
         prompt: SUBAGENT_PROMPT,
       })
     }
-    await $.command.register({ name: 'openrouter', description: 'OpenRouter subagents: balance, agents, spend, models (/openrouter help)' })
+    await $.command.register({ name: 'locum', description: 'OpenRouter subagents: balance, agents, spend, models (/locum help)' })
 
     // In the background, so a slow OpenRouter never holds up the session: check the
     // configured models exist and whether they take images, and the balance
@@ -252,7 +252,7 @@ export const register: Register = (on, options) => {
         deny:
           `${e.subagentType} can't run in auto mode: auto mode's safety check runs on Anthropic's side and refuses every ` +
           `tool call an OpenRouter subagent makes. Ask the user to switch to manual mode (or accept-edits) with Shift+Tab, ` +
-          `or to set the openrouter-agents option autoMode to "allow" (/plugin configure), then try again.`,
+          `or to set the Locum option autoMode to "allow" (/plugin configure), then try again.`,
       }
     }
     if (settings.maxSessionUsd > 0) {
@@ -304,7 +304,7 @@ export const register: Register = (on, options) => {
     // ask rule, a hook's, another plugin's, a setting's or an admin ceiling stands
     if (verdict.rule || verdict.hook || verdict.plugin || verdict.setting || e.ceiling === 'ask') return verdict
     return { decision: 'allow' as const, reason: `${$.plugin.name}: auto mode can't review OpenRouter models; allowed unreviewed (autoMode: allow)` }
-  }).catch(($, e, next) => (next.called ? next(e) : { decision: 'deny' as const, reason: 'openrouter-agents: permission check failed' }))
+  }).catch(($, e, next) => (next.called ? next(e) : { decision: 'deny' as const, reason: 'locum: permission check failed' }))
 
   // Deliver an auto-mode agent's report: the completion notice for a background
   // run, and the Agent tool's result for a foreground one, say no report came.
@@ -314,7 +314,7 @@ export const register: Register = (on, options) => {
     // Unreviewed model output: its "<" is escaped, so it can't close the notice
     // around it or forge another one outside the label
     const report = (run.report ?? '').replace(/</g, '&lt;')
-    return `[Report from ${label} via OpenRouter, delivered by the openrouter-agents plugin. Auto mode did not review this report or the work behind it. ${toolSummary(run.toolNames)}${fellBack}]\n\n${report}`
+    return `[Report from ${label} via OpenRouter, delivered by the Locum plugin. Auto mode did not review this report or the work behind it. ${toolSummary(run.toolNames)}${fellBack}]\n\n${report}`
   }
 
   on('prompt.submit', async ($, e, next) => {
@@ -411,7 +411,7 @@ export const register: Register = (on, options) => {
     if (!key) return yield* fail('OPENROUTER_API_KEY is not set in the environment claude started from')
     // Claude Code can't work without tool calls; say so before spending anything
     if (modelInfo.get(agent.model)?.tools === false) {
-      return yield* fail(`${agent.model} doesn't support tool calls, which Claude Code needs. Pick another model (/openrouter models lists ones that do)`)
+      return yield* fail(`${agent.model} doesn't support tool calls, which Claude Code needs. Pick another model (/locum models lists ones that do)`)
     }
 
     const messages = isSubagent ? await $.session.messages({ agentId: runKey, as: 'api' }) : await $.session.messages({ as: 'api' })
@@ -421,7 +421,7 @@ export const register: Register = (on, options) => {
     if (!isSubagent && isAuto && settings.autoMode !== 'allow') {
       return yield* fail(
         `auto mode can't review ${e.model}'s tool calls (its safety check runs on Anthropic's responses). Switch to manual mode ` +
-          `or accept-edits with Shift+Tab, set the openrouter-agents option autoMode to "allow", or go back to a Claude model with /model`,
+          `or accept-edits with Shift+Tab, set the Locum option autoMode to "allow", or go back to a Claude model with /model`,
       )
     }
 
@@ -445,7 +445,7 @@ export const register: Register = (on, options) => {
     const spentSession = settings.maxSessionUsd > 0 ? await sessionUsd($) : 0
     const capped =
       isSubagent && settings.maxRunUsd > 0 && run.usd >= settings.maxRunUsd
-        ? `this run reached the openrouter-agents spend cap of ${usd(settings.maxRunUsd)} per run (spent ${usd(run.usd)} over ${run.steps} steps). Raise maxRunUsd`
+        ? `this run reached the Locum spend cap of ${usd(settings.maxRunUsd)} per run (spent ${usd(run.usd)} over ${run.steps} steps). Raise maxRunUsd`
         : settings.maxSessionUsd > 0 && spentSession >= settings.maxSessionUsd
           ? `OpenRouter subagents reached the ${usd(settings.maxSessionUsd)} session cap (spent ${usd(spentSession)} this session). Raise maxSessionUsd`
           : undefined
@@ -560,12 +560,12 @@ export const register: Register = (on, options) => {
       if (failure.kind === 'policy') {
         return yield* fail(
           `no OpenRouter provider of ${agent.model} meets the privacy setting "${settings.privacy}". ` +
-            `Pick another model for this agent, or change the openrouter-agents privacy option (/plugin configure)`,
+            `Pick another model for this agent, or change the Locum privacy option (/plugin configure)`,
         )
       }
       if (failure.kind === 'context') return yield* fail(`the conversation is too long for ${agent.model}`, 'model_context_window_exceeded')
       if (failure.kind === 'unknownModel') {
-        return yield* fail(`OpenRouter doesn't know the model "${agent.model}". Check the ID with /openrouter models <name>`)
+        return yield* fail(`OpenRouter doesn't know the model "${agent.model}". Check the ID with /locum models <name>`)
       }
       if (failure.kind === 'credits') return yield* fail(`the OpenRouter balance is too low for this request. Top up at ${TOP_UP}`)
       if (failure.kind === 'creditCheck') {
@@ -599,7 +599,7 @@ export const register: Register = (on, options) => {
     const stepKey = `${e.turnId}:${e.index}`
     const index = (lastBlock.get(stepKey) ?? -1) + 1
     lastBlock.delete(stepKey)
-    const text = `[${name} via OpenRouter: this step failed inside the openrouter-agents plugin. Stop and report what you have.]`
+    const text = `[${name} via OpenRouter: this step failed inside the Locum plugin. Stop and report what you have.]`
     yield { kind: 'text' as const, index, text }
     yield { kind: 'stop' as const, stopReason: 'end_turn' as const, usage: null }
     return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn' as const, usage: null }
@@ -619,8 +619,8 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // /openrouter: what the plugin is set to and what it has spent, plus subcommands
-  on('command.run', { command: 'openrouter' }, async ($, e) => {
+  // /locum: what the plugin is set to and what it has spent, plus subcommands
+  on('command.run', { command: 'locum' }, async ($, e) => {
     const runs = Object.entries(await allRuns($)).sort(([, a], [, b]) => b.startedAt - a.startedAt)
     const version = await $.fs
       .read(`${$.plugin.root}/.claude-plugin/plugin.json`)

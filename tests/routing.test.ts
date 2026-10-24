@@ -22,7 +22,7 @@ test('another plugin\'s subagent is looked up once, then passed through', async 
 })
 
 test('a run of an agent the settings no longer have stops instead of falling to the session model', async ($, on) => {
-  const requests = engine(on, [sse([start(), ...text(0, 'x'), ...end('end_turn')])], 'openrouter-agents:custom')
+  const requests = engine(on, [sse([start(), ...text(0, 'x'), ...end('end_turn')])], 'locum:custom')
   const { result } = await step($)
   expect(requests.length).toBe(0)
   expect(result.answer).toMatch(/no longer configured/)

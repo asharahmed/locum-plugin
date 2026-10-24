@@ -1,5 +1,12 @@
 {
   "name": "ashar-local",
-  "owner": { "name": "Ashar Ahmed" },
-  "plugins": [{ "name": "openrouter-agents", "source": "./" }]
+  "owner": {
+    "name": "Ashar Ahmed"
+  },
+  "plugins": [
+    {
+      "name": "locum",
+      "source": "./"
+    }
+  ]
 }

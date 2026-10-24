@@ -13,7 +13,7 @@ export type AgentDef = {
 }
 
 // Subagent types this mod answers, each pinned to one OpenRouter model. The
-// Agent tool sees them as `openrouter-agents:<name>`. They are ordinary native
+// Agent tool sees them as `locum:<name>`. They are ordinary native
 // subagents; only their model requests go to OpenRouter. Each model and effort
 // can be changed in /plugin configure (`<name>Model`, `<name>Effort`). Provider
 // pins are the cheapest zero-retention providers measured on 2026-10-23.
@@ -150,7 +150,7 @@ export function loopAgent(model: string, vision: boolean): AgentDef {
   return { model, label: known?.label ?? model, when: '', vision, effort: 'medium', ...(known?.providers ? { providers: known.providers } : {}) }
 }
 
-// The agent's name inside `openrouter-agents:<name>`, or '' for any other type
+// The agent's name inside `locum:<name>`, or '' for any other type
 export function agentName(subagentType: string | undefined, plugin: string) {
   return subagentType?.startsWith(`${plugin}:`) ? subagentType.slice(plugin.length + 1) : ''
 }

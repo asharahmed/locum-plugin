@@ -9,7 +9,7 @@ import { MAIN_RUN, agentName } from './agents'
 
 // Every run of our agents this session, by agentId. Bump the shape tag when
 // AgentRun changes: the old value is then read as absent.
-export const runsAtom = atom({ plugin: 'openrouter-agents', key: 'runs' } as const, {} as Record<string, AgentRun>, { shape: 'runs-2' })
+export const runsAtom = atom({ plugin: 'locum', key: 'runs' } as const, {} as Record<string, AgentRun>, { shape: 'runs-2' })
 
 export function newRun(name: string, model: string, isAuto: boolean, startedAt: number, effort?: string): AgentRun {
   return {

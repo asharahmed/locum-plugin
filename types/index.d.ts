@@ -32,6 +32,6 @@ export type AgentRun = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'openrouter-agents': { runs: Shaped<Record<string, AgentRun>> }
+    'locum': { runs: Shaped<Record<string, AgentRun>> }
   }
 }

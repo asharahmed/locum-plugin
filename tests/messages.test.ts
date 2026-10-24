@@ -7,7 +7,7 @@ const say = (t: string) => sse([start(), ...text(0, t), ...end('end_turn')])
 const userBlocks = (...content: object[]) => [{ role: 'user', content }]
 
 test('an image is replaced by a note for a model that can\'t read images', async ($, on) => {
-  const requests = engine(on, [say('ok')], 'openrouter-agents:cheap', userBlocks({ type: 'text', text: 'look' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }))
+  const requests = engine(on, [say('ok')], 'locum:cheap', userBlocks({ type: 'text', text: 'look' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }))
   await step($)
   const content = JSON.parse(requests[0]!).messages[0].content
   expect(content.some((b: { type: string }) => b.type === 'image')).toBe(false)
@@ -15,7 +15,7 @@ test('an image is replaced by a note for a model that can\'t read images', async
 })
 
 test('an image goes as it is to a model that reads images', async ($, on) => {
-  const requests = engine(on, [say('ok')], 'openrouter-agents:deepseek', userBlocks({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }))
+  const requests = engine(on, [say('ok')], 'locum:deepseek', userBlocks({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }))
   await step($)
   expect(JSON.parse(requests[0]!).messages[0].content[0].type).toBe('image')
 })
@@ -26,7 +26,7 @@ test('ToolSearch results say which tools loaded and which can\'t be used', async
     { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'ToolSearch', input: { query: 'select:WebFetch,mcp__x__y' } }] },
     { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: [{ type: 'tool_reference', tool_name: 'WebFetch' }, { type: 'tool_reference', tool_name: 'mcp__x__y' }] }] },
   ]
-  const requests = engine(on, [say('ok')], 'openrouter-agents:cheap', messages)
+  const requests = engine(on, [say('ok')], 'locum:cheap', messages)
   await step($)
   const body = JSON.parse(requests[0]!)
   const result = JSON.stringify(body.messages[2].content)
@@ -37,7 +37,7 @@ test('ToolSearch results say which tools loaded and which can\'t be used', async
 })
 
 test('the model-identity line names the OpenRouter model', async ($, on) => {
-  const requests = engine(on, [say('ok')], 'openrouter-agents:kimi', userBlocks({ type: 'text', text: '<system-reminder>You are powered by the model named Opus 5.5. The exact model ID is claude-opus-5-5.</system-reminder>' }))
+  const requests = engine(on, [say('ok')], 'locum:kimi', userBlocks({ type: 'text', text: '<system-reminder>You are powered by the model named Opus 5.5. The exact model ID is claude-opus-5-5.</system-reminder>' }))
   await step($)
   const sent = JSON.stringify(JSON.parse(requests[0]!).messages)
   expect(sent).toMatch(/You are powered by the model named Kimi K3\. The exact model ID is moonshotai\/kimi-k3, reached through OpenRouter/)
@@ -45,17 +45,17 @@ test('the model-identity line names the OpenRouter model', async ($, on) => {
 })
 
 test('SubagentHandback is offered only when Claude Code says the subagent has it', async ($, on) => {
-  const requests = engine(on, [say('ok'), say('ok')], 'openrouter-agents:cheap', userBlocks({ type: 'text', text: 'Your final report is delivered through SubagentHandback.' }))
+  const requests = engine(on, [say('ok'), say('ok')], 'locum:cheap', userBlocks({ type: 'text', text: 'Your final report is delivered through SubagentHandback.' }))
   await step($)
   expect(JSON.parse(requests[0]!).tools.map((t: { name: string }) => t.name)).toContain('SubagentHandback')
 })
 
 test('in auto mode a SubagentHandback call becomes the report, never a tool call', { options: { autoMode: 'allow' } }, async ($, on) => {
-  engine(on, [sse([start(), ...toolUse(0, 'h1', 'SubagentHandback', { message: 'All checked.' }), ...end('tool_use')])], 'openrouter-agents:cheap', userBlocks({ type: 'text', text: 'Your final report is delivered through SubagentHandback.' }))
+  engine(on, [sse([start(), ...toolUse(0, 'h1', 'SubagentHandback', { message: 'All checked.' }), ...end('tool_use')])], 'locum:cheap', userBlocks({ type: 'text', text: 'Your final report is delivered through SubagentHandback.' }))
   on('agent.spawn', () => ({ model: 'deepseek/deepseek-v4-flash-0731', agentId: AGENT_ID }))
   let delivered = ''
   on('prompt.submit', (_$: unknown, e: { text: string }) => ((delivered = e.text), { text: e.text }))
-  await $.agent.spawn({ prompt: 'x', subagentType: 'openrouter-agents:cheap', permissionMode: 'auto' } as never)
+  await $.agent.spawn({ prompt: 'x', subagentType: 'locum:cheap', permissionMode: 'auto' } as never)
   const { chunks, result } = await step($)
   expect(chunks.some(c => c.kind === 'tool')).toBe(false)
   expect(result.toolUses).toHaveLength(0)
@@ -65,9 +65,9 @@ test('in auto mode a SubagentHandback call becomes the report, never a tool call
 
 test('auto mode: the engine\'s reminders are answered locally once a report is kept, after one nudge if no tools ran', { options: { autoMode: 'allow' } }, async ($, on) => {
   const reminder = [{ role: 'user', content: [{ type: 'text', text: '[handback-send-enforce] Your report has not been delivered.' }] }]
-  const requests = engine(on, [say('My report.'), say('My report again.')], 'openrouter-agents:cheap', reminder)
+  const requests = engine(on, [say('My report.'), say('My report again.')], 'locum:cheap', reminder)
   on('agent.spawn', () => ({ model: 'deepseek/deepseek-v4-flash-0731', agentId: AGENT_ID }))
-  await $.agent.spawn({ prompt: 'x', subagentType: 'openrouter-agents:cheap', permissionMode: 'auto' } as never)
+  await $.agent.spawn({ prompt: 'x', subagentType: 'locum:cheap', permissionMode: 'auto' } as never)
   await step($, 0) // the report, with no tool calls behind it
   await step($, 1) // first reminder: the nudge goes to the model
   expect(requests.length).toBe(2)
@@ -78,12 +78,12 @@ test('auto mode: the engine\'s reminders are answered locally once a report is k
 })
 
 test('a mode change mid-run is seen from the next tool call', { options: { autoMode: 'allow' } }, async ($, on) => {
-  engine(on, [say('x')], 'openrouter-agents:cheap')
+  engine(on, [say('x')], 'locum:cheap')
   on('agent.spawn', () => ({ model: 'deepseek/deepseek-v4-flash-0731', agentId: AGENT_ID }))
   on('tool.check', () => ({ decision: 'ask' }))
   on('tool.call', () => ({ result: 'ran' }))
   on('classic.PostToolUse', () => ({}))
-  await $.agent.spawn({ prompt: 'x', subagentType: 'openrouter-agents:cheap', permissionMode: 'default' } as never)
+  await $.agent.spawn({ prompt: 'x', subagentType: 'locum:cheap', permissionMode: 'default' } as never)
   await step($)
   const before: any = await $.tool.call({ tool: 'Bash', command: 'ls', agentId: AGENT_ID } as never)
   expect(before.deny !== undefined || before.isError === true).toBe(true)
@@ -94,7 +94,7 @@ test('a mode change mid-run is seen from the next tool call', { options: { autoM
 })
 
 test('the Agent call\'s effort sets the reasoning budget', async ($, on) => {
-  const requests = engine(on, [say('ok')], 'openrouter-agents:kimi')
+  const requests = engine(on, [say('ok')], 'locum:kimi')
   on('agent.spawn', () => ({ model: 'moonshotai/kimi-k3', agentId: AGENT_ID }))
   // As the engine does: the Agent call starts the subagent while it runs
   on('tool.call', async (_$: unknown, e: { tool_use_id: string; subagent_type?: string }) => {
@@ -102,7 +102,7 @@ test('the Agent call\'s effort sets the reasoning budget', async ($, on) => {
     return { result: { status: 'async_launched', agentId: AGENT_ID } }
   })
   // Kimi's default effort is low (1,024 tokens); the call asks for high (8,000)
-  await $.tool.call({ tool: 'Agent', description: 'x', prompt: 'x', subagent_type: 'openrouter-agents:kimi', effort: 'high' } as never)
+  await $.tool.call({ tool: 'Agent', description: 'x', prompt: 'x', subagent_type: 'locum:kimi', effort: 'high' } as never)
   await step($)
   expect(JSON.parse(requests[0]!).thinking.budget_tokens).toBe(8000)
 })

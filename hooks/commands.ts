@@ -1,4 +1,4 @@
-// /openrouter and its subcommands, plus the two things they keep across
+// /locum and its subcommands, plus the two things they keep across
 // sessions in $.store: the spend ledger and the models chosen with `use`.
 
 import type { EngineInterface } from 'claude-code'
@@ -48,7 +48,7 @@ export async function addSpend($: EngineInterface, agent: string, amount: number
   return write
 }
 
-// Agent -> model chosen with `/openrouter use`, kept across sessions
+// Agent -> model chosen with `/locum use`, kept across sessions
 export async function readOverrides($: EngineInterface): Promise<Record<string, string>> {
   const v = await $.store.get(OVERRIDES)
   return v && typeof v === 'object' ? (v as Record<string, string>) : {}
@@ -115,11 +115,11 @@ async function mainSessionLine($: EngineInterface, mainModel: string) {
 
 const HELP = [
   'Usage:',
-  '  /openrouter                     balance, agents, settings, this session\'s runs and spend history',
-  '  /openrouter models [search]     tool-capable OpenRouter models, cheapest first',
-  '  /openrouter use <agent> <model> run an agent on another OpenRouter model (kept across sessions; takes effect after /reload-plugins)',
-  '  /openrouter use <agent> default back to the configured model',
-  '  /openrouter help                this list',
+  '  /locum                     balance, agents, settings, this session\'s runs and spend history',
+  '  /locum models [search]     tool-capable OpenRouter models, cheapest first',
+  '  /locum use <agent> <model> run an agent on another OpenRouter model (kept across sessions; takes effect after /reload-plugins)',
+  '  /locum use <agent> default back to the configured model',
+  '  /locum help                this list',
 ]
 
 export async function runCommand(
@@ -154,7 +154,7 @@ export async function runCommand(
       lines.push(`  ${m.id.padEnd(44)} $${perMillion(m.pricing?.prompt).toFixed(3)} / $${perMillion(m.pricing?.completion).toFixed(3)}${ctx}${img}${reasoning}`)
     }
     if (models.length > shown.length) lines.push(`  …and ${models.length - shown.length} more; narrow the search.`)
-    lines.push('', 'Run an agent on one with /openrouter use <agent> <model>, or set customModel in /plugin configure.')
+    lines.push('', 'Run an agent on one with /locum use <agent> <model>, or set customModel in /plugin configure.')
     return lines.join('\n')
   }
 
@@ -170,11 +170,11 @@ export async function runCommand(
     }
     if (key) {
       const known = (await listModels($, key).catch(() => [] as ListedModel[])).find(m => m.id === model)
-      if (!known) return `OpenRouter has no model "${model}". Search with /openrouter models <name>.`
+      if (!known) return `OpenRouter has no model "${model}". Search with /locum models <name>.`
       if (!(known.supported_parameters ?? []).includes('tools')) return `${model} doesn't support tool calls, which subagents need.`
     }
     await $.store.set(OVERRIDES, { ...overrides, [agent]: model })
-    return `${agent} will run on ${model} after /reload-plugins (kept across sessions; undo with /openrouter use ${agent} default).`
+    return `${agent} will run on ${model} after /reload-plugins (kept across sessions; undo with /locum use ${agent} default).`
   }
 
   if (sub) return [`Unknown subcommand "${sub}".`, ...HELP].join('\n')
@@ -191,7 +191,7 @@ export async function runCommand(
   }
   const overrides = await readOverrides($)
   const lines = [
-    `OpenRouter subagents${version ? ` ${version}` : ''}`,
+    `Locum${version ? ` ${version}` : ''}: Claude Code agents on OpenRouter models`,
     money,
     `This session: ${runs.length} run${runs.length === 1 ? '' : 's'}, ${usd(spent)} spent. Caps: ${settings.maxRunUsd > 0 ? usd(settings.maxRunUsd) : 'none'} per run, ${settings.maxSessionUsd > 0 ? usd(settings.maxSessionUsd) : 'none'} per session.`,
     `Settings: privacy ${settings.privacy}, auto mode ${settings.autoMode}, fallback model ${settings.fallbackModel}.`,
@@ -200,7 +200,7 @@ export async function runCommand(
     'Agents:',
     ...Object.entries(settings.agents).map(
       ([name, a]) =>
-        `  ${name.padEnd(9)} ${a.model} · effort ${a.effort}${a.providers ? ` · providers ${a.providers.join(', ')}` : ''}${a.vision ? '' : ' · no images'}${overrides[name] ? ' · set with /openrouter use' : ''}`,
+        `  ${name.padEnd(9)} ${a.model} · effort ${a.effort}${a.providers ? ` · providers ${a.providers.join(', ')}` : ''}${a.vision ? '' : ' · no images'}${overrides[name] ? ' · set with /locum use' : ''}`,
     ),
     '',
     'Spend history (all sessions):',
@@ -227,6 +227,6 @@ export async function runCommand(
     }
     if (runs.length > 10) lines.push(`  …and ${runs.length - 10} earlier`)
   }
-  lines.push('', '/openrouter help lists the subcommands. Settings: /plugin configure openrouter-agents@ashar-local.')
+  lines.push('', '/locum help lists the subcommands. Settings: /plugin configure locum@ashar-local.')
   return lines.join('\n')
 }

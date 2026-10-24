@@ -1,7 +1,7 @@
 {
-  "name": "openrouter-agents",
-  "version": "1.0.0",
-  "description": "Native Agent-tool subagent types (deepseek, kimi, glm) whose model requests go to OpenRouter",
+  "name": "locum",
+  "version": "1.0.1",
+  "description": "Native Claude Code subagents, and the main session itself, running on OpenRouter models; your Claude login stays the default",
   "license": "MIT",
   "userConfig": {
     "lowBalanceUsd": {

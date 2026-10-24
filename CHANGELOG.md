@@ -1,5 +1,12 @@
 # Changelog
 
+Locum was called openrouter-agents until 1.0.1.
+
+## 1.0.1
+
+- Renamed from openrouter-agents to **Locum**: the plugin is `locum@ashar-local`, the agent types `locum:deepseek`, `locum:kimi`, `locum:glm`, `locum:cheap` and `locum:custom`, the command `/locum`, and the repository `claude-locum`. Behaviour is unchanged. README "Upgrading" says how to move saved options and the spend history across.
+- README rewritten: what Locum is and why the name, a quick start, then the agents, main-session switching, `/locum`, settings, cost and reliability, auto mode, safety, limits, requirements, troubleshooting, upgrading and development.
+
 ## 1.0.0
 
 The first stable release. Unchanged code since 0.9.9, which passed every automated test (49) and every live scenario (12), on Claude Code 2.1.309 and again on 2.1.310.

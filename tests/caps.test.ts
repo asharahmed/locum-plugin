@@ -19,7 +19,7 @@ test('the session cap stops a run', { options: { maxSessionUsd: 0.001, maxRunUsd
 
 test('a capped run hands back through SubagentHandback when Claude Code offers it', { options: { maxRunUsd: 0.001 } }, async ($, on) => {
   const offered = [{ role: 'user', content: [{ type: 'text', text: 'Do the task.' }, { type: 'text', text: 'Your final report is delivered through SubagentHandback.' }] }]
-  const requests = engine(on, [sse([start(), ...toolUse(0, 'call_1', 'Bash', { command: 'ls' }), ...end('tool_use', 0.002)])], 'openrouter-agents:cheap', offered)
+  const requests = engine(on, [sse([start(), ...toolUse(0, 'call_1', 'Bash', { command: 'ls' }), ...end('tool_use', 0.002)])], 'locum:cheap', offered)
   await step($, 0)
   const { chunks, result } = await step($, 1)
   expect(requests.length).toBe(1)

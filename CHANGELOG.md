@@ -2,6 +2,12 @@
 
 Locum was called openrouter-agents until 1.0.1.
 
+## 1.1.4
+
+- The repository is now `asharahmed/locum-plugin` (it was `claude-locum`). Claude Code's legal page says third parties can't use the Claude Code or Anthropic names as part of their own product's name. The plugin is still `locum@asharahmed`, and GitHub redirects the old URLs.
+- `DISCLAIMER.md`, linked from the README: Locum isn't affiliated with or endorsed by Anthropic; Anthropic doesn't support Claude Code on other models, so Locum problems go to Locum's issue tracker; what each kind of request sends to other providers (including Claude Code's system prompt and earlier Claude replies when the main session is switched); and what `autoMode: allow` gives up.
+- `hooks/schemas.ts` no longer contains Claude Code's own parameter descriptions. All 276 are rewritten in Locum's words in `scripts/tool-descriptions.json`; the schemas' structure is unchanged. `scripts/gen-schemas.py` applies them when regenerating, drops any description it has no wording for and lists it, and `--descriptions-only` reapplies them to the committed file.
+
 ## 1.1.3
 
 - Routing by price. With a lab's key set, each step goes first to whichever route costs less at that moment, the lab's own API or OpenRouter, and the other is the backup. Prices come from OpenRouter's public lists at session start: the providers that meet the privacy setting (OpenRouter's zero-retention list under `zero-retention` and `no-data-collection`), and the lab's own listing for its price. The comparison uses a typical step (mostly cached input), adds OpenRouter's 5.5% credit fee, and counts DeepSeek's peak hours.

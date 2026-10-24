@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.9
+
+- Release candidate. `scripts/live-regression.sh`: twelve scenarios against real OpenRouter, each checked by outcome (files the agents wrote are rerun) and for steps leaking to Anthropic. All twelve passed for $0.04: the four agents, auto mode with `allow` and `refuse`, the main session on OpenRouter, the run cap, the privacy setting, the path guard, `/openrouter`, and compaction across resumes.
+
 ## 0.9.8
 
 - README: a troubleshooting table covering every message the plugin shows (cause and fix), how to confirm with a debug log that nothing reaches Anthropic, and upgrading notes (pulling a folder marketplace, regenerating schemas after a Claude Code update, state shape changes, the `qwen` → `cheap` rename).

@@ -12,20 +12,18 @@ Your Claude login and model stay the default. You hand work to a Locum agent whe
 
 ## Quick start
 
-1. Get an [OpenRouter API key](https://openrouter.ai/settings/keys) with a few dollars of credit, and export it where Claude Code will see it, in your shell profile for example:
-
-   ```
-   export OPENROUTER_API_KEY=sk-or-...
-   ```
-
-2. Install the plugin, from a clone or straight from GitHub (a private repository needs `gh` or git signed in to an account that can read it):
+1. Install the plugin, from a clone or straight from GitHub (a private repository needs `gh` or git signed in to an account that can read it):
 
    ```
    claude plugin marketplace add /path/to/claude-locum      # or: asharahmed/claude-locum
    claude plugin install locum@ashar-local --scope user
    ```
 
-3. Start a session, or run `/reload-plugins` in one, and ask for an agent: "have the deepseek agent write tests for parser.py". `/locum` shows your balance, the agents and what they've spent.
+2. Claude Code asks for the plugin's settings. Paste an [OpenRouter API key](https://openrouter.ai/settings/keys) (with a few dollars of credit) into the first field and leave the rest as they are. The key is kept in your keychain. That one key runs every agent.
+
+3. Start a session, or run `/reload-plugins` in one, and ask for an agent: "have the deepseek agent write tests for parser.py".
+
+`/locum setup` shows which keys are set and where to get the optional ones, and `/locum` shows your balance, the agents and what they've spent. To change a key later, run `/plugin configure locum@ashar-local`. An `OPENROUTER_API_KEY` in your environment works too, for a field left empty.
 
 ## The agents
 
@@ -60,6 +58,7 @@ Every model and reasoning effort can be changed (see Settings), and `/locum mode
 | `/locum` | Balance and key limit; each agent's model, effort and providers; the settings; the main session's model and the picker entry; spend history across sessions (today, last 7 days, all recorded, per agent); model health this session; this session's runs. |
 | `/locum models [search]` | Tool-capable OpenRouter models matching the search, cheapest input first, with price, context, images and reasoning. |
 | `/locum use <agent> <model>` | Puts an agent on another model, checked against OpenRouter's list (it must support tool calls). Kept across sessions, applied at `/reload-plugins`, and ahead of `/plugin configure` until `/locum use <agent> default`. |
+| `/locum setup` | Which keys are set, where to get the others, and how to add them. |
 | `/locum help` | The list above. |
 
 ## Settings
@@ -71,8 +70,9 @@ Change them with `/plugin configure locum@ashar-local`.
 | `privacy` | `zero-retention` | Which providers may serve Locum's requests: `zero-retention` (providers that keep no prompts), `no-data-collection` (none that store or train on prompts) or `off`. The agents send your files and command output to the provider. |
 | `maxRunUsd` | 0.5 | A run that has spent this much stops before its next step, with a report saying so. 0 turns the cap off. |
 | `maxSessionUsd` | 3 | Once a session's OpenRouter spend reaches this, new agents are refused and running ones stop. 0 turns the cap off. |
-| `direct` | empty | Labs to call directly for the models they serve: any of `deepseek`, `zai`, `dashscope`, `minimax`. See Direct providers. |
-| `dashscopeBaseUrl` | empty | Your Alibaba Model Studio workspace's Anthropic-compatible URL, if the international default doesn't take your key. |
+| OpenRouter, DeepSeek, Alibaba, MiniMax and Z.ai API keys | empty | Kept in your keychain. OpenRouter's runs every agent; the others send their lab's models to it directly (see Direct providers). An empty field falls back to the matching environment variable. |
+| `direct` | `auto` | `auto`: models whose lab has a key go to it first. `off`: everything through OpenRouter. |
+| `dashscopeBaseUrl` | empty | Only for a workspace-dedicated Alibaba URL; otherwise Locum finds your key's region. |
 | `fallbackModel` | DeepSeek V4 Flash 0731 | A step whose model keeps failing (outage, rate limit, provider error) is retried once on this model, never a Claude model. |
 | `autoMode` | `refuse` | Whether Locum agents run in auto mode (see below). |
 | `lowBalanceUsd` | 5 | A notice at session start when the balance or the key's limit is below this. 0 turns it off. |
@@ -89,31 +89,24 @@ Change them with `/plugin configure locum@ashar-local`.
 
 ## Direct providers
 
-OpenRouter charges the lab's own per-token price for a model the lab serves there. What it adds is a 5.5% fee when you buy credit. With the `direct` option, a model whose lab is listed goes to that lab's Anthropic-compatible API first:
+OpenRouter charges the lab's own per-token price for a model the lab serves there. What it adds is a 5.5% fee when you buy credit. Give Locum a lab's own key and that lab's models go to it directly, with OpenRouter as the backup:
 
-| `direct` entry | Lab | Key in the environment | Models it takes |
+| Key field in `/plugin configure` | Lab | Models it takes | Worth it? |
 |---|---|---|---|
-| `deepseek` | DeepSeek | `DEEPSEEK_API_KEY` | DeepSeek V4.1 Flash (as `deepseek-flash`), V4 Pro |
-| `zai` | Z.ai | `ZAI_API_KEY` | GLM-5.3, GLM-5.3 Flash |
-| `dashscope` | Alibaba Model Studio | `DASHSCOPE_API_KEY` | Qwen 3.8 Flash, Qwen 3.8 Max |
-| `minimax` | MiniMax | `MINIMAX_API_KEY` | MiniMax M3.1 Flash |
+| DeepSeek API key | DeepSeek | DeepSeek V4.1 Flash, V4 Pro | yes: no 5.5% fee |
+| Alibaba Model Studio API key | Alibaba | Qwen 3.8 Flash, Qwen 3.8 Max | yes: OpenRouter has no zero-retention host for Qwen, so with the default privacy setting `locum:qwen` runs only this way |
+| MiniMax API key | MiniMax | MiniMax M3.1 Flash | yes: no 5.5% fee |
+| Z.ai API key | Z.ai | GLM-5.3, GLM-5.3 Flash | only with a GLM Coding Plan (flat monthly price); per token, other hosts on OpenRouter serve GLM-5.3 for far less (Wafer at $0.08/$1.40 per million against Z.ai's $1.40/$4.40, October 2026) |
 
-```
-export DEEPSEEK_API_KEY=sk-...
-```
+There's nothing else to set. `/locum setup` links to each lab's key page, and `/locum` shows the route each agent takes.
 
-then `direct: deepseek` in `/plugin configure locum@ashar-local`. `/locum` shows each agent's route and names any listed lab whose key is missing.
-
-- A direct request that fails (bad key, empty balance, an outage, a model ID the lab doesn't take) is sent again through OpenRouter for the same model, then the fallback model as before. A direct route that fails 3 steps in a row is skipped for 2 minutes.
-- Direct APIs don't report cost, so Locum prices direct steps from the labs' October 2026 price lists (`hooks/providers.ts`). DeepSeek's doubled peak-hour prices (01:00–04:00 and 06:00–10:00 UTC on weekdays) are counted. The caps apply as usual.
-- **Privacy:** the `privacy` option filters OpenRouter's providers only. A direct call goes to the lab under its own terms. Leave `direct` empty if that matters for your code.
-- Compaction of a main session on an OpenRouter model still goes through OpenRouter.
-
-Direct is cheaper in some cases and dearer in others:
-
-- Worth it for DeepSeek and MiniMax when you top up often (no 5.5% fee), and for Qwen 3.8 Flash, which only Alibaba serves and which OpenRouter's zero-retention filter excludes, so with `privacy: zero-retention` it runs only direct.
-- Worth it for GLM if you have Z.ai's GLM Coding Plan: its key works at the same endpoint at a flat monthly price.
-- Not worth it for GLM-5.3 at Z.ai's per-token price ($1.40/$4.40 per million). Other hosts on OpenRouter serve it for much less (Wafer at $0.08/$1.40 in October 2026), and `/locum models z-ai/glm` shows the current prices.
+- **Regions:** Alibaba, MiniMax and Z.ai keys belong to one region. Locum tries the lab's regional endpoints in turn (Alibaba: Singapore, Virginia, Beijing, Hong Kong, then the Coding Plan's host) and remembers the one that took the key. A workspace-dedicated Alibaba URL goes in `dashscopeBaseUrl`.
+- **Failures:** a direct request that fails (an outage, an empty balance, a model ID the lab doesn't take) is sent again through OpenRouter for the same model, then to the fallback model as before. A key a lab refuses at every endpoint gets one notice and is left unused for the rest of the session. With no OpenRouter key at all, the labs' models still run, and the others say which key to add.
+- **Cost:** direct APIs don't report cost, so Locum prices direct steps from the labs' October 2026 price lists (`hooks/providers.ts`), with DeepSeek's doubled peak-hour prices (01:00–04:00 and 06:00–10:00 UTC on weekdays). The caps apply as usual.
+- **Privacy:** the `privacy` option filters OpenRouter's providers only. A direct call goes to the lab under its own terms. Set `direct` to `off` to keep every call on OpenRouter, keys or not.
+- Compacting a main session that runs on an OpenRouter model still goes through OpenRouter.
+- Keys in the environment work for fields left empty: `DEEPSEEK_API_KEY`, `DASHSCOPE_API_KEY`, `MINIMAX_API_KEY`, `ZAI_API_KEY`.
+- To set a key from a terminal without it landing in your shell history: `read -rs K && printf '{"deepseekApiKey":"%s"}' "$K" | claude plugin configure locum@ashar-local --values-stdin; unset K`.
 
 ## Auto mode
 

@@ -1,9 +1,44 @@
 {
   "name": "locum",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Native Claude Code subagents, and the main session itself, on DeepSeek, GLM, Qwen, Kimi and other models, through the labs' own APIs or OpenRouter; your Claude login stays the default",
   "license": "MIT",
   "userConfig": {
+    "openrouterApiKey": {
+      "type": "string",
+      "title": "OpenRouter API key",
+      "description": "From openrouter.ai/settings/keys. Runs every agent; enough on its own. Kept in your keychain. Empty: OPENROUTER_API_KEY from the environment.",
+      "sensitive": true,
+      "default": ""
+    },
+    "deepseekApiKey": {
+      "type": "string",
+      "title": "DeepSeek API key",
+      "description": "From platform.deepseek.com. The deepseek agent then calls DeepSeek directly, without OpenRouter's 5.5% credit fee, under DeepSeek's own data terms. Empty: DEEPSEEK_API_KEY, else OpenRouter.",
+      "sensitive": true,
+      "default": ""
+    },
+    "dashscopeApiKey": {
+      "type": "string",
+      "title": "Alibaba Model Studio API key",
+      "description": "From Model Studio, any region (Locum finds it). Needed for the qwen agent under zero-retention privacy, since OpenRouter has no zero-retention host for Qwen. Empty: DASHSCOPE_API_KEY, else OpenRouter.",
+      "sensitive": true,
+      "default": ""
+    },
+    "minimaxApiKey": {
+      "type": "string",
+      "title": "MiniMax API key",
+      "description": "From platform.minimax.io or minimaxi.com. The minimax agent then calls MiniMax directly. Empty: MINIMAX_API_KEY, else OpenRouter.",
+      "sensitive": true,
+      "default": ""
+    },
+    "zaiApiKey": {
+      "type": "string",
+      "title": "Z.ai API key",
+      "description": "Worth it with a GLM Coding Plan (flat monthly price). At Z.ai's per-token prices GLM is cheaper through OpenRouter. Empty: ZAI_API_KEY, else OpenRouter.",
+      "sensitive": true,
+      "default": ""
+    },
     "lowBalanceUsd": {
       "type": "number",
       "title": "Low-balance warning (USD)",
@@ -45,14 +80,18 @@
     },
     "direct": {
       "type": "string",
-      "title": "Direct providers",
-      "description": "Labs to call directly, ahead of OpenRouter, for the models they serve: any of deepseek, zai, dashscope, minimax, comma-separated. Each needs its key in the environment (DEEPSEEK_API_KEY, ZAI_API_KEY, DASHSCOPE_API_KEY, MINIMAX_API_KEY). Direct calls skip the privacy routing above. Empty: OpenRouter only.",
-      "default": ""
+      "title": "Direct calls to the labs",
+      "description": "auto: a model whose lab you gave a key goes to that lab first, then OpenRouter if it fails. off: everything through OpenRouter.",
+      "options": [
+        "auto",
+        "off"
+      ],
+      "default": "auto"
     },
     "dashscopeBaseUrl": {
       "type": "string",
       "title": "Alibaba Model Studio base URL",
-      "description": "Your workspace's Anthropic-compatible URL, ending in /apps/anthropic. Empty uses https://dashscope-intl.aliyuncs.com/apps/anthropic.",
+      "description": "Only for a workspace-dedicated URL ending in /apps/anthropic. Empty: Locum tries Alibaba's regional endpoints until one takes your key.",
       "default": ""
     },
     "fallbackModel": {

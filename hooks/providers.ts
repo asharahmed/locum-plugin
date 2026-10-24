@@ -7,9 +7,15 @@ export type Price = { input: number; cacheRead: number; output: number }
 export type Provider = {
   id: string
   label: string
-  // Anthropic-compatible base URL; `/v1/messages` is appended
-  baseUrl: string
+  // Anthropic-compatible base URLs; `/v1/messages` is appended. Keys are bound
+  // to a region, so a key the first refuses is tried at the others in turn.
+  baseUrls: string[]
   keyEnv: string
+  // The plugin option (stored in the keychain) that holds the key, and where to get one
+  keyOption: string
+  keyPage: string
+  // What a key there is worth, for /locum setup
+  why: string
   // How the key is sent: DeepSeek documents x-api-key, the others take a bearer token
   auth: 'x-api-key' | 'bearer'
   // OpenRouter model ID -> the provider's own model ID and USD-per-token price
@@ -34,8 +40,11 @@ export const PROVIDERS: Record<string, Provider> = {
   deepseek: {
     id: 'deepseek',
     label: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com/anthropic',
+    baseUrls: ['https://api.deepseek.com/anthropic'],
     keyEnv: 'DEEPSEEK_API_KEY',
+    keyOption: 'deepseekApiKey',
+    keyPage: 'https://platform.deepseek.com/api_keys',
+    why: 'the deepseek agent, without the 5.5% fee OpenRouter adds to credit',
     auth: 'x-api-key',
     models: {
       'deepseek/deepseek-v4.1-flash-1017': { id: 'deepseek-flash', price: perM(0.15, 0.003, 0.6) },
@@ -48,8 +57,12 @@ export const PROVIDERS: Record<string, Provider> = {
   zai: {
     id: 'zai',
     label: 'Z.ai',
-    baseUrl: 'https://api.z.ai/api/anthropic',
+    // International, then Zhipu's mainland endpoint; a GLM Coding Plan key works at the same URLs
+    baseUrls: ['https://api.z.ai/api/anthropic', 'https://open.bigmodel.cn/api/anthropic'],
     keyEnv: 'ZAI_API_KEY',
+    keyOption: 'zaiApiKey',
+    keyPage: 'https://z.ai/manage-apikey/apikey-list',
+    why: 'the glm agent; only worth it with a GLM Coding Plan, since OpenRouter hosts GLM for less per token',
     auth: 'bearer',
     models: {
       'z-ai/glm-5.3': { id: 'glm-5.3', price: perM(1.4, 0.26, 4.4) },
@@ -59,9 +72,19 @@ export const PROVIDERS: Record<string, Provider> = {
   dashscope: {
     id: 'dashscope',
     label: 'Alibaba Model Studio',
-    // International default; a workspace URL can replace it (option `dashscopeBaseUrl`)
-    baseUrl: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+    // Singapore, Virginia, Beijing, Hong Kong, then the Coding Plan's host. A
+    // workspace URL can replace them all (option `dashscopeBaseUrl`).
+    baseUrls: [
+      'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+      'https://dashscope-us.aliyuncs.com/apps/anthropic',
+      'https://dashscope.aliyuncs.com/apps/anthropic',
+      'https://cn-hongkong.dashscope.aliyuncs.com/apps/anthropic',
+      'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic',
+    ],
     keyEnv: 'DASHSCOPE_API_KEY',
+    keyOption: 'dashscopeApiKey',
+    keyPage: 'https://modelstudio.console.alibabacloud.com (API Key page)',
+    why: 'the qwen agent; with zero-retention privacy it only runs this way (any region works)',
     auth: 'bearer',
     models: {
       'qwen/qwen3.8-flash': { id: 'qwen3.8-flash', price: perM(0.15, 0.03 /* est. */, 0.47) },
@@ -71,8 +94,12 @@ export const PROVIDERS: Record<string, Provider> = {
   minimax: {
     id: 'minimax',
     label: 'MiniMax',
-    baseUrl: 'https://api.minimax.io/anthropic',
+    // International, then mainland China
+    baseUrls: ['https://api.minimax.io/anthropic', 'https://api.minimaxi.com/anthropic'],
     keyEnv: 'MINIMAX_API_KEY',
+    keyOption: 'minimaxApiKey',
+    keyPage: 'https://platform.minimax.io (API Keys)',
+    why: 'the minimax agent, without the 5.5% fee',
     auth: 'bearer',
     models: {
       // MiniMax's docs and guides disagree on this ID; a wrong one falls to OpenRouter
@@ -81,17 +108,29 @@ export const PROVIDERS: Record<string, Provider> = {
   },
 }
 
-export type Route = { provider: Provider; model: string; price: Price; url: string }
+// `urls` are the endpoints to try, best first; `url` is the first
+export type Route = { provider: Provider; model: string; price: Price; url: string; urls: string[] }
+
+const messagesUrl = (base: string) => `${base.replace(/\/+$/, '')}/v1/messages`
 
 // The direct route for an OpenRouter model ID, if an enabled provider with a
-// key serves it; undefined means OpenRouter
-export function directRoute(model: string, enabled: readonly string[], keys: Readonly<Record<string, string | undefined>>, baseUrls: Readonly<Record<string, string>> = {}): Route | undefined {
+// key serves it; undefined means OpenRouter. `working` holds the endpoint that
+// last took each provider's key, tried first.
+export function directRoute(
+  model: string,
+  enabled: readonly string[],
+  keys: Readonly<Record<string, string | undefined>>,
+  baseUrls: Readonly<Record<string, string>> = {},
+  working: Readonly<Record<string, string>> = {},
+): Route | undefined {
   for (const id of enabled) {
     const provider = PROVIDERS[id]
     const entry = provider?.models[model]
     if (!provider || !entry || !keys[provider.keyEnv]) continue
-    const base = (baseUrls[id] || provider.baseUrl).replace(/\/+$/, '')
-    return { provider, model: entry.id, price: entry.price, url: `${base}/v1/messages` }
+    const all = baseUrls[id] ? [messagesUrl(baseUrls[id]!)] : provider.baseUrls.map(messagesUrl)
+    const first = working[id] && all.includes(working[id]!) ? working[id]! : all[0]!
+    const urls = [first, ...all.filter(u => u !== first)]
+    return { provider, model: entry.id, price: entry.price, url: first, urls }
   }
   return undefined
 }

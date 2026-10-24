@@ -43,6 +43,8 @@ export type Failure = {
   // unknownModel: OpenRouter doesn't know the model ID
   kind: 'policy' | 'context' | 'credits' | 'creditCheck' | 'unknownModel' | 'retryable' | 'other' | 'interrupted'
   message: string
+  // The HTTP status, when there was one
+  status?: number
 }
 
 export type StepOutcome = {
@@ -242,7 +244,7 @@ export async function* streamStep($: EngineInterface, req: StepRequest) {
     }
     const kind = classify(errorText, status)
     const message = `HTTP ${status || '?'}: ${errorText.slice(0, 300) || 'no reply'}`
-    if ((kind !== 'retryable' && kind !== 'creditCheck') || attempt >= RETRY_WAITS_MS.length) return { ...out, failure: { kind, message } }
+    if ((kind !== 'retryable' && kind !== 'creditCheck') || attempt >= RETRY_WAITS_MS.length) return { ...out, failure: { kind, message, status } }
     if (kind === 'creditCheck') {
       // Halve the worst case OpenRouter checks the balance against
       const cap = Math.max(MIN_MAX_TOKENS, Math.floor(Number(body.max_tokens ?? MIN_MAX_TOKENS * 2) / 2))
@@ -256,6 +258,15 @@ export async function* streamStep($: EngineInterface, req: StepRequest) {
 }
 
 // OpenRouter's account balance and this key's remaining limit; undefined where unknown
+// Where a key is entered: the plugin's config dialog, which keeps it in the keychain
+export const CONFIGURE = '/plugin configure locum@ashar-local'
+export const NO_KEY = `no OpenRouter key: add one in ${CONFIGURE} (or set OPENROUTER_API_KEY)`
+
+// The OpenRouter key: the one entered in the config dialog, else the environment's
+export async function openRouterKey($: EngineInterface, keys: Readonly<Record<string, string>>) {
+  return keys.OPENROUTER_API_KEY || (await $.env.get('OPENROUTER_API_KEY'))
+}
+
 export async function balanceOf($: EngineInterface, key: string) {
   const headers = { authorization: `Bearer ${key}` }
   const [credits, keyInfo] = await Promise.all([

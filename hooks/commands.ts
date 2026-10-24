@@ -6,7 +6,8 @@ import type { AgentRun } from '../types'
 import type { Settings } from './agents'
 import { DEFAULT_AGENTS } from './agents'
 import { toolSummary } from './messages'
-import { OPENROUTER, balanceOf } from './openrouter'
+import { balanceOf, CONFIGURE, NO_KEY, OPENROUTER, openRouterKey } from './openrouter'
+import { PROVIDERS } from './providers'
 
 export const TOP_UP = 'https://openrouter.ai/settings/credits'
 const LEDGER = 'ledger-v1'
@@ -119,8 +120,28 @@ const HELP = [
   '  /locum models [search]     tool-capable OpenRouter models, cheapest first',
   '  /locum use <agent> <model> run an agent on another OpenRouter model (kept across sessions; takes effect after /reload-plugins)',
   '  /locum use <agent> default back to the configured model',
+  '  /locum setup               which keys are set, where to get the others, and how to add them',
   '  /locum help                this list',
 ]
+
+// /locum setup: what's set, and the steps for the rest
+export function setupText(openRouter: boolean, labKeys: Readonly<Record<string, boolean>>) {
+  const mark = (set: boolean) => (set ? '[set]    ' : '[not set]')
+  return [
+    'Locum setup',
+    '',
+    `${mark(openRouter)} OpenRouter API key: runs every agent, and is all you need. Get one at https://openrouter.ai/settings/keys`,
+    '',
+    'Optional, each sends its lab\'s models straight to the lab:',
+    ...Object.values(PROVIDERS).map(p => `${mark(!!labKeys[p.id])} ${p.label} API key: ${p.why}. ${p.keyPage}`),
+    '',
+    `To add or change a key: ${CONFIGURE}, paste it into its field (it's kept in your keychain), then /reload-plugins.`,
+    'From a terminal instead, without the key landing in your shell history:',
+    `  read -rs K && printf '{"deepseekApiKey":"%s"}' "$K" | claude plugin configure locum@ashar-local --values-stdin; unset K`,
+    '  (openrouterApiKey, dashscopeApiKey, minimaxApiKey and zaiApiKey work the same way)',
+    'Keys in the environment work too: OPENROUTER_API_KEY, DEEPSEEK_API_KEY, DASHSCOPE_API_KEY, MINIMAX_API_KEY, ZAI_API_KEY.',
+  ].join('\n')
+}
 
 export async function runCommand(
   $: EngineInterface,
@@ -131,15 +152,16 @@ export async function runCommand(
   mainModel: string,
   health: ReadonlyMap<string, Health> = new Map(),
   routes: Readonly<Record<string, string>> = {},
-  missingKeys: readonly string[] = [],
+  labKeys: Readonly<Record<string, boolean>> = {},
 ): Promise<string> {
   const [sub = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
-  const key = await $.env.get('OPENROUTER_API_KEY')
+  const key = await openRouterKey($, settings.keys)
 
   if (sub === 'help') return HELP.join('\n')
+  if (sub === 'setup') return setupText(!!key, labKeys)
 
   if (sub === 'models') {
-    if (!key) return 'OPENROUTER_API_KEY is not set in the environment claude started from.'
+    if (!key) return `Searching models needs an OpenRouter key: ${NO_KEY}.`
     const query = rest.join(' ').toLowerCase()
     const models = (await listModels($, key))
       .filter(m => (m.supported_parameters ?? []).includes('tools') && !m.id.endsWith(':free') && !m.id.endsWith(':batch'))
@@ -183,7 +205,7 @@ export async function runCommand(
 
   // The overview
   const spent = runs.reduce((sum, [, r]) => sum + r.usd, 0)
-  let money = 'Balance: OPENROUTER_API_KEY is not set in the environment claude started from.'
+  let money = `Balance: ${NO_KEY}.`
   if (key) {
     const { account, keyLeft } = await balanceOf($, key).catch(() => ({ account: undefined, keyLeft: undefined }))
     money =
@@ -204,9 +226,12 @@ export async function runCommand(
       ([name, a]) =>
         `  ${name.padEnd(9)} ${a.model} · effort ${a.effort}${routes[name] ? ` · ${routes[name]}` : a.providers ? ` · providers ${a.providers.join(', ')}` : ''}${a.vision ? '' : ' · no images'}${overrides[name] ? ' · set with /locum use' : ''}`,
     ),
-    ...(settings.direct.length
-      ? [`  Direct providers: ${settings.direct.join(', ')}${missingKeys.length ? `; no key for ${missingKeys.join(', ')}, so those go through OpenRouter` : ''}. Direct calls skip OpenRouter's privacy filter.`]
-      : []),
+    `  Keys: OpenRouter ${key ? 'set' : 'not set'} · ${Object.values(PROVIDERS).map(p => `${p.label} ${labKeys[p.id] ? 'set' : 'not set'}`).join(' · ')}. /locum setup says how to add them.`,
+    ...(!settings.direct.length
+      ? ['  Direct calls to the labs are off (option `direct`).']
+      : Object.values(labKeys).some(Boolean)
+        ? ["  Calls to a lab with a key go to it directly, under its own terms: OpenRouter's privacy setting doesn't cover them."]
+        : []),
     '',
     'Spend history (all sessions):',
     ...spendLines(await readLedger($), await $.clock.now()),

@@ -19,7 +19,7 @@ import {
   withNudge,
 } from './messages'
 import type { StepOutcome } from './openrouter'
-import { balanceOf, completeText, streamStep } from './openrouter'
+import { CONFIGURE, NO_KEY, balanceOf, completeText, openRouterKey, streamStep } from './openrouter'
 import type { Route } from './providers'
 import { PROVIDERS, directRoute, priceNow } from './providers'
 import { SUBAGENT_TOOLS } from './schemas'
@@ -77,7 +77,12 @@ export const register: Register = (on, options) => {
   const composed = new Map<string, string>()
   // The direct providers' keys by env name, read at session start
   const directKeys: Record<string, string | undefined> = {}
-  const routeFor = (model: string) => directRoute(model, settings.direct, directKeys, settings.baseUrls)
+  // The endpoint that last took each provider's key (keys are bound to a region)
+  const workingUrl: Record<string, string> = {}
+  // Providers whose key every endpoint refused this session: OpenRouter from then on
+  const refusedKey = new Set<string>()
+  const routeFor = (model: string) =>
+    directRoute(model, settings.direct.filter(id => !refusedKey.has(id)), directKeys, settings.baseUrls, workingUrl)
   // How a model is reached, for descriptions and headers
   const via = (model: string) => {
     const route = routeFor(model)
@@ -123,13 +128,13 @@ export const register: Register = (on, options) => {
     const started = await next(e)
     cwd = e.cwd
     home = (await $.env.get('HOME')) ?? ''
-    // Literal names, so the validator can list what the plugin reads
-    if (settings.direct.length) {
-      directKeys.DEEPSEEK_API_KEY = await $.env.get('DEEPSEEK_API_KEY')
-      directKeys.ZAI_API_KEY = await $.env.get('ZAI_API_KEY')
-      directKeys.DASHSCOPE_API_KEY = await $.env.get('DASHSCOPE_API_KEY')
-      directKeys.MINIMAX_API_KEY = await $.env.get('MINIMAX_API_KEY')
-    }
+    // A key entered in the config dialog, else the environment's (literal names,
+    // so the validator can list what the plugin reads)
+    const k = settings.keys
+    directKeys.DEEPSEEK_API_KEY = k.DEEPSEEK_API_KEY || (await $.env.get('DEEPSEEK_API_KEY'))
+    directKeys.ZAI_API_KEY = k.ZAI_API_KEY || (await $.env.get('ZAI_API_KEY'))
+    directKeys.DASHSCOPE_API_KEY = k.DASHSCOPE_API_KEY || (await $.env.get('DASHSCOPE_API_KEY'))
+    directKeys.MINIMAX_API_KEY = k.MINIMAX_API_KEY || (await $.env.get('MINIMAX_API_KEY'))
     // Models chosen with `/locum use` win over the configured ones
     applyOverrides(settings, await readOverrides($).catch(() => ({})))
     for (const [name, a] of Object.entries(agents)) {
@@ -145,9 +150,13 @@ export const register: Register = (on, options) => {
     // In the background, so a slow OpenRouter never holds up the session: check the
     // configured models exist and whether they take images, and the balance
     void (async () => {
-      const key = await $.env.get('OPENROUTER_API_KEY')
-      if (!key) return
-      const models = await $.http.fetch('https://openrouter.ai/api/v1/models', { headers: { authorization: `Bearer ${key}` } })
+      const key = await openRouterKey($, settings.keys)
+      if (!key && !Object.values(directKeys).some(Boolean)) {
+        $.ui.toast(`Locum needs an API key: run /locum setup, or add one in ${CONFIGURE}`)
+        return
+      }
+      // The model list is public; it gives capabilities and prices with or without a key
+      const models = await $.http.fetch('https://openrouter.ai/api/v1/models', key ? { headers: { authorization: `Bearer ${key}` } } : {})
       if (models.ok) {
         const listed = new Map(
           (
@@ -185,7 +194,7 @@ export const register: Register = (on, options) => {
         if (!listed.has(settings.fallbackModel)) missing.push(`fallbackModel (${settings.fallbackModel})`)
         if (missing.length) $.ui.toast(`OpenRouter has no model for: ${missing.join(', ')}. Check /plugin configure.`)
       }
-      if (!(settings.lowBalanceUsd > 0)) return
+      if (!key || !(settings.lowBalanceUsd > 0)) return
       const { account, keyLeft } = await balanceOf($, key)
       const left = [account, keyLeft].filter((v): v is number => v !== undefined)
       if (left.length && Math.min(...left) < settings.lowBalanceUsd) {
@@ -236,8 +245,8 @@ export const register: Register = (on, options) => {
     if (settings.maxSessionUsd > 0 && (await sessionUsd($)) >= settings.maxSessionUsd) {
       return { skip: `the OpenRouter session cap of ${usd(settings.maxSessionUsd)} is reached, so ${model} won't compact this conversation (raise maxSessionUsd in /plugin configure)` }
     }
-    const key = await $.env.get('OPENROUTER_API_KEY')
-    if (!key) return { skip: 'OPENROUTER_API_KEY is not set, so the OpenRouter conversation can\'t be compacted' }
+    const key = await openRouterKey($, settings.keys)
+    if (!key) return { skip: `compacting needs an OpenRouter key; ${NO_KEY}` }
     const agent = e.agentId !== undefined ? (agents[(await getRun($, e.agentId))?.name ?? ''] ?? loopAgent(model, false)) : loopAgent(model, false)
     const transcript = e.messages
       .map(m => `${m.role.toUpperCase()}: ${m.text}${m.toolUses.length ? `\n[tools: ${m.toolUses.map(t => `${t.tool}${t.isError ? ' (error)' : ''}`).join(', ')}]` : ''}`)
@@ -424,8 +433,9 @@ export const register: Register = (on, options) => {
       return done(text, stopReason, null)
     }
 
-    const key = await $.env.get('OPENROUTER_API_KEY')
-    if (!key) return yield* fail('OPENROUTER_API_KEY is not set in the environment claude started from')
+    // Without an OpenRouter key only a model a lab with a key serves can run
+    const key = await openRouterKey($, settings.keys)
+    if (!key && !routeFor(agent.model)) return yield* fail(`${NO_KEY}, or a key for the lab that serves ${agent.model}`)
     // Claude Code can't work without tool calls; say so before spending anything
     if (modelInfo.get(agent.model)?.tools === false) {
       return yield* fail(`${agent.model} doesn't support tool calls, which Claude Code needs. Pick another model (/locum models lists ones that do)`)
@@ -499,7 +509,7 @@ export const register: Register = (on, options) => {
       }
       requestChars = JSON.stringify(body).length
       return streamStep($, {
-        key: route ? directKeys[route.provider.keyEnv]! : key,
+        key: route ? directKeys[route.provider.keyEnv]! : key!,
         ...(route ? { url: route.url, auth: route.provider.auth } : {}),
         body,
         isAuto: isSubagent && isAuto,
@@ -522,6 +532,7 @@ export const register: Register = (on, options) => {
         h.ok++
         h.ms += (await $.clock.now()) - started
         h.streak = 0
+        delete h.skipUntil
       } else if (result.failure.kind !== 'interrupted') {
         h.fails++
         h.streak++
@@ -537,14 +548,32 @@ export const register: Register = (on, options) => {
     const attempt = async function* (a: AgentDef) {
       const route = routeFor(a.model)
       if (route && (healthOf(`${a.model} via ${route.provider.label}`).skipUntil ?? 0) <= (await $.clock.now())) {
-        const direct: StepOutcome = yield* timed(a, route)
-        stepCost += costOf(a.model, direct, requestChars, priceNow(route, new Date(await $.clock.now())))
+        let direct!: StepOutcome
+        for (const url of route.urls) {
+          direct = yield* timed(a, { ...route, url })
+          stepCost += costOf(a.model, direct, requestChars, priceNow(route, new Date(await $.clock.now())))
+          if (!direct.failure) workingUrl[route.provider.id] = url
+          // A key refused at one region's endpoint may be another region's
+          const refused = direct.failure?.status === 401 || direct.failure?.status === 403
+          if (!refused || direct.yielded) break
+        }
         const f = direct.failure
-        if (!f || direct.yielded || f.kind === 'interrupted' || f.kind === 'context') {
+        if ((f?.status === 401 || f?.status === 403) && !direct.yielded && !refusedKey.has(route.provider.id)) {
+          refusedKey.add(route.provider.id)
+          $.ui.toast(`${route.provider.label} refused its API key, so Locum uses OpenRouter for its models this session. Fix the key in ${CONFIGURE}.`)
+        }
+        if (!f || direct.yielded || f.kind === 'interrupted' || f.kind === 'context' || !key) {
           if (!f) directUsed = route
           return direct
         }
         $.ui.log(`${owner}: ${route.provider.label} direct failed (${f.message.slice(0, 80)}); trying OpenRouter`)
+      }
+      if (!key) {
+        return {
+          yielded: false, answer: '', stopReason: null, toolUses: [], model: a.model, cost: 0,
+          usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          failure: { kind: 'other', message: `${NO_KEY}, or a key for the lab that serves ${a.model}` },
+        } satisfies StepOutcome
       }
       const viaOpenRouter: StepOutcome = yield* timed(a)
       stepCost += costOf(a.model, viaOpenRouter, requestChars)
@@ -673,8 +702,8 @@ export const register: Register = (on, options) => {
       const route = routeFor(a.model)
       if (route) routes[name] = `direct via ${route.provider.label} (${route.model}), then OpenRouter`
     }
-    const missingKeys = settings.direct.filter(id => PROVIDERS[id] && !directKeys[PROVIDERS[id]!.keyEnv]).map(id => `${id} (set ${PROVIDERS[id]!.keyEnv})`)
-    return { text: await runCommand($, e.args ?? '', settings, runs, version, mainModel, health, routes, missingKeys) }
+    const labKeys = Object.fromEntries(Object.values(PROVIDERS).map(p => [p.id, !!directKeys[p.keyEnv]]))
+    return { text: await runCommand($, e.args ?? '', settings, runs, version, mainModel, health, routes, labKeys) }
   })
 
   // Opening one of our agents' transcripts shows the session's model in the

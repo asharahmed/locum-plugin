@@ -1,4 +1,5 @@
 // The agents this plugin answers, and how the plugin's options shape them.
+import { PROVIDERS } from './providers'
 
 export type AgentDef = {
   model: string
@@ -104,8 +105,12 @@ export type Settings = {
   maxRunUsd: number
   maxSessionUsd: number
   fallbackModel: string
-  // Labs called directly, ahead of OpenRouter, for the models they serve (providers.ts)
+  // Labs called directly, ahead of OpenRouter, for the models they serve (providers.ts):
+  // all of them unless the `direct` option is off; only those with a key are used
   direct: string[]
+  // API keys entered in /plugin configure, by their environment variable's name;
+  // an empty one falls back to that variable
+  keys: Record<string, string>
   // A base URL replacing a provider's default (Alibaba's workspace URLs)
   baseUrls: Record<string, string>
 }
@@ -151,10 +156,12 @@ export function readSettings(options: Readonly<Record<string, unknown>>): Settin
     maxRunUsd: amount('maxRunUsd', 0.5),
     maxSessionUsd: amount('maxSessionUsd', 3),
     fallbackModel: opt('fallbackModel') || DEFAULT_FALLBACK,
-    direct: opt('direct')
-      .split(/[\s,]+/)
-      .map(d => d.toLowerCase())
-      .filter(Boolean),
+    direct: opt('direct') === 'off' ? [] : Object.keys(PROVIDERS),
+    keys: Object.fromEntries(
+      [['OPENROUTER_API_KEY', 'openrouterApiKey'], ...Object.values(PROVIDERS).map(p => [p.keyEnv, p.keyOption])]
+        .map(([env, option]) => [env!, opt(option!)])
+        .filter(([, v]) => v),
+    ),
     baseUrls: opt('dashscopeBaseUrl') ? { dashscope: opt('dashscopeBaseUrl') } : {},
   }
 }

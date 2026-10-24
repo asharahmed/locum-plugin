@@ -2,6 +2,19 @@
 
 Locum was called openrouter-agents until 1.0.1.
 
+## 1.1.1
+
+Setup made as short as it can be: install, paste one key, done.
+
+- API keys go in the plugin's config dialog (`/plugin configure locum@ashar-local`), which Claude Code shows at install and keeps in the keychain: OpenRouter's first, then optional DeepSeek, Alibaba, MiniMax and Z.ai keys. Environment variables still work for any field left empty.
+- `direct` is now `auto` (the default) or `off`. With `auto`, a lab you've given a key gets its models directly; there's no list of labs to type.
+- Region-bound keys need no URL: Locum tries Alibaba's endpoints (Singapore, Virginia, Beijing, Hong Kong, the Coding Plan's host), MiniMax's (international, mainland) and Z.ai's (international, Zhipu) until one takes the key, and keeps using that one. `dashscopeBaseUrl` is only for workspace-dedicated URLs.
+- A key a lab refuses at every endpoint gets one notice naming the config dialog, and isn't tried again that session.
+- A lab key works without an OpenRouter key: that lab's models run, and others say which key to add. With no key at all, the session-start notice points to `/locum setup`.
+- `/locum setup` lists which keys are set, what each one is for, where to get it, and how to add it from the dialog or a terminal. `/locum` shows a keys line.
+- Verified live: a key saved through `claude plugin configure --values-stdin` reached the plugin from the keychain, went to DeepSeek, and didn't appear in the debug log.
+- 61 tests.
+
 ## 1.1.0
 
 - Direct providers. The new `direct` option lists labs to call through their own Anthropic-compatible APIs ahead of OpenRouter: `deepseek` (DeepSeek), `zai` (Z.ai), `dashscope` (Alibaba Model Studio, with `dashscopeBaseUrl` for a workspace URL) and `minimax` (MiniMax). Each needs its key in the environment. A failed direct request goes to OpenRouter for the same model, then to the fallback model; a direct route that keeps failing is skipped for a while.

@@ -1,7 +1,7 @@
 {
   "name": "locum",
-  "version": "1.0.1",
-  "description": "Native Claude Code subagents, and the main session itself, running on OpenRouter models; your Claude login stays the default",
+  "version": "1.1.0",
+  "description": "Native Claude Code subagents, and the main session itself, on DeepSeek, GLM, Qwen, Kimi and other models, through the labs' own APIs or OpenRouter; your Claude login stays the default",
   "license": "MIT",
   "userConfig": {
     "lowBalanceUsd": {
@@ -42,6 +42,18 @@
         "off"
       ],
       "default": "zero-retention"
+    },
+    "direct": {
+      "type": "string",
+      "title": "Direct providers",
+      "description": "Labs to call directly, ahead of OpenRouter, for the models they serve: any of deepseek, zai, dashscope, minimax, comma-separated. Each needs its key in the environment (DEEPSEEK_API_KEY, ZAI_API_KEY, DASHSCOPE_API_KEY, MINIMAX_API_KEY). Direct calls skip the privacy routing above. Empty: OpenRouter only.",
+      "default": ""
+    },
+    "dashscopeBaseUrl": {
+      "type": "string",
+      "title": "Alibaba Model Studio base URL",
+      "description": "Your workspace's Anthropic-compatible URL, ending in /apps/anthropic. Empty uses https://dashscope-intl.aliyuncs.com/apps/anthropic.",
+      "default": ""
     },
     "fallbackModel": {
       "type": "string",
@@ -91,7 +103,7 @@
       "type": "string",
       "title": "glm: OpenRouter model",
       "description": "OpenRouter model ID behind the glm agent.",
-      "default": "z-ai/glm-5.2"
+      "default": "z-ai/glm-5.3"
     },
     "glmEffort": {
       "type": "string",
@@ -125,10 +137,48 @@
       ],
       "default": "medium"
     },
+    "qwenModel": {
+      "type": "string",
+      "title": "qwen: model",
+      "description": "OpenRouter model ID behind the qwen agent.",
+      "default": "qwen/qwen3.8-flash"
+    },
+    "qwenEffort": {
+      "type": "string",
+      "title": "qwen: reasoning effort",
+      "description": "Reasoning budget when the Agent call names no effort.",
+      "options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "medium"
+    },
+    "minimaxModel": {
+      "type": "string",
+      "title": "minimax: model",
+      "description": "OpenRouter model ID behind the minimax agent.",
+      "default": "minimax/minimax-m3.1-flash"
+    },
+    "minimaxEffort": {
+      "type": "string",
+      "title": "minimax: reasoning effort",
+      "description": "Reasoning budget when the Agent call names no effort.",
+      "options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "medium"
+    },
     "customModel": {
       "type": "string",
       "title": "custom: OpenRouter model",
-      "description": "Any OpenRouter model ID; when set, an openrouter-agents:custom agent runs on it. Leave empty to turn it off.",
+      "description": "Any OpenRouter model ID; when set, a locum:custom agent runs on it. Leave empty to turn it off.",
       "default": ""
     },
     "customLabel": {

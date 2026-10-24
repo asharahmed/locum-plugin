@@ -40,8 +40,9 @@ export const DEFAULT_AGENTS: Record<string, AgentDef> = {
     when: 'Use when the user asks for Kimi, or wants a second opinion from a different model family.',
   },
   glm: {
-    model: 'z-ai/glm-5.2',
-    label: 'GLM-5.2',
+    // GLM-5.3, Z.ai's flagship (cheapest OpenRouter hosts in October 2026: $0.08/$1.40 per M)
+    model: 'z-ai/glm-5.3',
+    label: 'GLM-5.3',
     vision: false,
     effort: 'medium',
     when: 'Use when the user asks for GLM, or for design and planning work.',
@@ -57,6 +58,22 @@ export const DEFAULT_AGENTS: Record<string, AgentDef> = {
     // against CoreWeave's $0.0009)
     providers: ['relace', 'reka'],
     when: 'Very low cost ($0.044/$0.133 per million tokens). Use when the user asks for the cheap agent, or for tests and simple tasks.',
+  },
+  qwen: {
+    // On OpenRouter only Alibaba serves it, and not under zero retention: best direct
+    model: 'qwen/qwen3.8-flash',
+    label: 'Qwen 3.8 Flash',
+    vision: true,
+    effort: 'medium',
+    when: 'Use when the user asks for Qwen. Low cost ($0.15/$0.47 per million tokens).',
+  },
+  minimax: {
+    // Tied for best on a coding benchmark (44/44 hidden checks) at $0.15/$0.60
+    model: 'minimax/minimax-m3.1-flash',
+    label: 'MiniMax M3.1 Flash',
+    vision: true,
+    effort: 'medium',
+    when: 'Use when the user asks for MiniMax. Low cost, strong at agentic coding.',
   },
 }
 
@@ -87,6 +104,10 @@ export type Settings = {
   maxRunUsd: number
   maxSessionUsd: number
   fallbackModel: string
+  // Labs called directly, ahead of OpenRouter, for the models they serve (providers.ts)
+  direct: string[]
+  // A base URL replacing a provider's default (Alibaba's workspace URLs)
+  baseUrls: Record<string, string>
 }
 
 // Everything the options decide: each default agent with its model and effort
@@ -130,6 +151,11 @@ export function readSettings(options: Readonly<Record<string, unknown>>): Settin
     maxRunUsd: amount('maxRunUsd', 0.5),
     maxSessionUsd: amount('maxSessionUsd', 3),
     fallbackModel: opt('fallbackModel') || DEFAULT_FALLBACK,
+    direct: opt('direct')
+      .split(/[\s,]+/)
+      .map(d => d.toLowerCase())
+      .filter(Boolean),
+    baseUrls: opt('dashscopeBaseUrl') ? { dashscope: opt('dashscopeBaseUrl') } : {},
   }
 }
 

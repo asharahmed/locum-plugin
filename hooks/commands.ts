@@ -130,6 +130,8 @@ export async function runCommand(
   version: string,
   mainModel: string,
   health: ReadonlyMap<string, Health> = new Map(),
+  routes: Readonly<Record<string, string>> = {},
+  missingKeys: readonly string[] = [],
 ): Promise<string> {
   const [sub = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
   const key = await $.env.get('OPENROUTER_API_KEY')
@@ -200,8 +202,11 @@ export async function runCommand(
     'Agents:',
     ...Object.entries(settings.agents).map(
       ([name, a]) =>
-        `  ${name.padEnd(9)} ${a.model} · effort ${a.effort}${a.providers ? ` · providers ${a.providers.join(', ')}` : ''}${a.vision ? '' : ' · no images'}${overrides[name] ? ' · set with /locum use' : ''}`,
+        `  ${name.padEnd(9)} ${a.model} · effort ${a.effort}${routes[name] ? ` · ${routes[name]}` : a.providers ? ` · providers ${a.providers.join(', ')}` : ''}${a.vision ? '' : ' · no images'}${overrides[name] ? ' · set with /locum use' : ''}`,
     ),
+    ...(settings.direct.length
+      ? [`  Direct providers: ${settings.direct.join(', ')}${missingKeys.length ? `; no key for ${missingKeys.join(', ')}, so those go through OpenRouter` : ''}. Direct calls skip OpenRouter's privacy filter.`]
+      : []),
     '',
     'Spend history (all sessions):',
     ...spendLines(await readLedger($), await $.clock.now()),

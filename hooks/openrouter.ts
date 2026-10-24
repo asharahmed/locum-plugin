@@ -79,6 +79,10 @@ function classify(errorText: string, status: number): Failure['kind'] {
 
 export type StepRequest = {
   key: string
+  // Where the request goes and how the key is sent: OpenRouter by default, or a
+  // lab's own Anthropic-compatible API (see providers.ts)
+  url?: string
+  auth?: 'bearer' | 'x-api-key'
   body: Record<string, unknown>
   // In auto mode a SubagentHandback call becomes text and the report
   isAuto: boolean
@@ -110,15 +114,15 @@ export async function* streamStep($: EngineInterface, req: StepRequest) {
     // gives up after 30 s. The key goes in through the environment, not argv.
     const child = $.process.spawn({
       argv: [
-        'curl', '-sSN', '--variable', '%OR_KEY',
-        '--expand-header', 'authorization: Bearer {{OR_KEY}}',
+        'curl', '-sSN', '--variable', '%LOCUM_KEY',
+        '--expand-header', req.auth === 'x-api-key' ? 'x-api-key: {{LOCUM_KEY}}' : 'authorization: Bearer {{LOCUM_KEY}}',
         '-H', 'content-type: application/json',
         '-H', 'anthropic-version: 2023-06-01',
         '--data-binary', '@-',
         '-w', '\n__STATUS__%{http_code}\n',
-        `${OPENROUTER}/messages`,
+        req.url ?? `${OPENROUTER}/messages`,
       ],
-      env: { OR_KEY: req.key },
+      env: { LOCUM_KEY: req.key },
       input: JSON.stringify(body),
     })
 

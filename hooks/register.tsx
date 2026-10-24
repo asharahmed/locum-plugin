@@ -20,6 +20,8 @@ import {
 } from './messages'
 import type { StepOutcome } from './openrouter'
 import { balanceOf, completeText, streamStep } from './openrouter'
+import type { Route } from './providers'
+import { PROVIDERS, directRoute, priceNow } from './providers'
 import { SUBAGENT_TOOLS } from './schemas'
 import { allRuns, getRun, loopRunOf, newRun, patchRun, putRun, runOf, sessionUsd } from './state'
 
@@ -57,9 +59,9 @@ export const register: Register = (on, options) => {
   // A step's cost: what OpenRouter reported, else an estimate from its tokens (or,
   // for a reply cut off before its usage, the request's size) at the listed prices,
   // so a provider that leaves cost out can't slip past the caps
-  const costOf = (model: string, outcome: StepOutcome, requestChars: number) => {
+  const costOf = (model: string, outcome: StepOutcome, requestChars: number, directPrice?: { input: number; output: number; cacheRead: number }) => {
     if (outcome.cost > 0) return outcome.cost
-    const price = modelInfo.get(model)?.price
+    const price = directPrice ?? modelInfo.get(model)?.price
     if (!price) return 0
     const u = outcome.usage
     const input = u.input_tokens || (outcome.yielded || outcome.failure?.kind === 'interrupted' ? Math.ceil(requestChars / 4) : 0)
@@ -73,6 +75,14 @@ export const register: Register = (on, options) => {
   let mainModel = ''
   // Claude Code's own system prompt for each model, as prompt.compose rendered it
   const composed = new Map<string, string>()
+  // The direct providers' keys by env name, read at session start
+  const directKeys: Record<string, string | undefined> = {}
+  const routeFor = (model: string) => directRoute(model, settings.direct, directKeys, settings.baseUrls)
+  // How a model is reached, for descriptions and headers
+  const via = (model: string) => {
+    const route = routeFor(model)
+    return route ? `via ${route.provider.label}'s API` : 'via OpenRouter'
+  }
   // Each model's record this session, for skipping one that keeps failing and for /locum
   const health = new Map<string, Health>()
   const healthOf = (model: string) => {
@@ -113,12 +123,19 @@ export const register: Register = (on, options) => {
     const started = await next(e)
     cwd = e.cwd
     home = (await $.env.get('HOME')) ?? ''
+    // Literal names, so the validator can list what the plugin reads
+    if (settings.direct.length) {
+      directKeys.DEEPSEEK_API_KEY = await $.env.get('DEEPSEEK_API_KEY')
+      directKeys.ZAI_API_KEY = await $.env.get('ZAI_API_KEY')
+      directKeys.DASHSCOPE_API_KEY = await $.env.get('DASHSCOPE_API_KEY')
+      directKeys.MINIMAX_API_KEY = await $.env.get('MINIMAX_API_KEY')
+    }
     // Models chosen with `/locum use` win over the configured ones
     applyOverrides(settings, await readOverrides($).catch(() => ({})))
     for (const [name, a] of Object.entries(agents)) {
       await $.agent.register({
         name,
-        description: `Subagent on ${a.label} via OpenRouter. ${a.when}`,
+        description: `Subagent on ${a.label} ${via(a.model)}. ${a.when}`,
         // No `tools`: Claude Code grants the native subagent tool pool
         prompt: SUBAGENT_PROMPT,
       })
@@ -472,12 +489,18 @@ export const register: Register = (on, options) => {
     // The main session keeps Claude Code's own system prompt; a subagent the agent definition's
     const systemText = isSubagent ? SUBAGENT_PROMPT + (isAuto ? AUTO_REPORT_RULE : '') : (composed.get(e.model) ?? MAIN_PROMPT_FALLBACK)
     let requestChars = 0
-    const request = (a: AgentDef) => {
+    const request = (a: AgentDef, route?: Route) => {
       const adapted = adaptMessages(messages, a, isSubagent && isAuto)
-      const body = requestBody(a, nudge ? withNudge(adapted) : adapted, tools, budget, systemText)
+      const body: Record<string, unknown> = requestBody(a, nudge ? withNudge(adapted) : adapted, tools, budget, systemText)
+      if (route) {
+        // The lab's own model ID, and no OpenRouter-only provider preferences
+        body.model = route.model
+        delete body.provider
+      }
       requestChars = JSON.stringify(body).length
       return streamStep($, {
-        key,
+        key: route ? directKeys[route.provider.keyEnv]! : key,
+        ...(route ? { url: route.url, auth: route.provider.auth } : {}),
         body,
         isAuto: isSubagent && isAuto,
         signal: next.signal,
@@ -490,11 +513,11 @@ export const register: Register = (on, options) => {
     let outcome: StepOutcome
     let usedFallback = false
     const providers = new Set(run.providers)
-    // Times one request and records how its model did
-    const timed = async function* (a: AgentDef) {
+    // Times one request and records how its model (on that route) did
+    const timed = async function* (a: AgentDef, route?: Route) {
       const started = await $.clock.now()
-      const result: StepOutcome = yield* request(a)
-      const h = healthOf(a.model)
+      const result: StepOutcome = yield* request(a, route)
+      const h = healthOf(route ? `${a.model} via ${route.provider.label}` : a.model)
       if (!result.failure || result.yielded) {
         h.ok++
         h.ms += (await $.clock.now()) - started
@@ -507,19 +530,38 @@ export const register: Register = (on, options) => {
       }
       return result
     }
+    // One model's attempt: its direct route first when there is one, then OpenRouter.
+    // A direct failure (an outage, a wrong model ID, an empty balance there) goes
+    // on to OpenRouter; one that already showed output, or an interruption, stops.
+    let directUsed: Route | undefined
+    const attempt = async function* (a: AgentDef) {
+      const route = routeFor(a.model)
+      if (route && (healthOf(`${a.model} via ${route.provider.label}`).skipUntil ?? 0) <= (await $.clock.now())) {
+        const direct: StepOutcome = yield* timed(a, route)
+        stepCost += costOf(a.model, direct, requestChars, priceNow(route, new Date(await $.clock.now())))
+        const f = direct.failure
+        if (!f || direct.yielded || f.kind === 'interrupted' || f.kind === 'context') {
+          if (!f) directUsed = route
+          return direct
+        }
+        $.ui.log(`${owner}: ${route.provider.label} direct failed (${f.message.slice(0, 80)}); trying OpenRouter`)
+      }
+      const viaOpenRouter: StepOutcome = yield* timed(a)
+      stepCost += costOf(a.model, viaOpenRouter, requestChars)
+      return viaOpenRouter
+    }
+
     try {
       // A model that failed its last few steps is skipped for a while: straight to the fallback
       const skipping = (healthOf(agent.model).skipUntil ?? 0) > (await $.clock.now())
       const fallback = fallbackFor(agent)
       if (skipping) {
         showStatus(`${agent.model} is failing; using ${fallback.model}`)
-        outcome = yield* timed(fallback)
-        stepCost += costOf(fallback.model, outcome, requestChars)
+        outcome = yield* attempt(fallback)
         if (outcome.provider) providers.add(outcome.provider)
         if (!outcome.failure) usedFallback = true
       } else {
-        outcome = yield* timed(agent)
-        stepCost += costOf(agent.model, outcome, requestChars)
+        outcome = yield* attempt(agent)
         if (outcome.provider) providers.add(outcome.provider)
       }
       // A step its own model can't answer moves to the fallback model, once
@@ -527,8 +569,7 @@ export const register: Register = (on, options) => {
       // (not a model OpenRouter doesn't know: a typo shouldn't be hidden behind another model)
       if (!skipping && first && !outcome.yielded && (first.kind === 'retryable' || first.kind === 'other' || first.kind === 'creditCheck')) {
         showStatus(`${agent.model} failing; trying ${fallback.model}`)
-        const second = yield* timed(fallback)
-        stepCost += costOf(fallback.model, second, requestChars)
+        const second = yield* attempt(fallback)
         if (second.provider) providers.add(second.provider)
         if (!second.failure) {
           usedFallback = true
@@ -541,6 +582,7 @@ export const register: Register = (on, options) => {
     } catch (err) {
       return yield* fail(String(err).slice(0, 300))
     } finally {
+      if (directUsed) providers.add(`${directUsed.provider.label} (direct)`)
       await addSpend($, owner, stepCost).catch(() => {})
       await patchRun($, agentId, r => ({
         ...r,
@@ -626,7 +668,13 @@ export const register: Register = (on, options) => {
       .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
       .then(t => String((JSON.parse(String(t)) as { version?: unknown }).version ?? ''))
       .catch(() => '')
-    return { text: await runCommand($, e.args ?? '', settings, runs, version, mainModel, health) }
+    const routes: Record<string, string> = {}
+    for (const [name, a] of Object.entries(settings.agents)) {
+      const route = routeFor(a.model)
+      if (route) routes[name] = `direct via ${route.provider.label} (${route.model}), then OpenRouter`
+    }
+    const missingKeys = settings.direct.filter(id => PROVIDERS[id] && !directKeys[PROVIDERS[id]!.keyEnv]).map(id => `${id} (set ${PROVIDERS[id]!.keyEnv})`)
+    return { text: await runCommand($, e.args ?? '', settings, runs, version, mainModel, health, routes, missingKeys) }
   })
 
   // Opening one of our agents' transcripts shows the session's model in the
@@ -644,7 +692,7 @@ export const register: Register = (on, options) => {
     return (
       <Box>
         <Text dimColor>
-          {run.name} · {label} ({run.model}) via OpenRouter
+          {run.name} · {label} ({run.model}) {via(run.model)}
         </Text>
       </Box>
     )
@@ -663,7 +711,7 @@ export const register: Register = (on, options) => {
     if (!run || !isOpenRouterModel(run.model) || !/^Using .+ \(from /.test(e.props.text)) return next(e)
     const label = agents[run.name]?.label ?? run.model
     const { Text } = $.ui.resolve(e)
-    return <Text dimColor>Using {label} ({run.model}) via OpenRouter · this subagent</Text>
+    return <Text dimColor>Using {label} ({run.model}) {via(run.model)} · this subagent</Text>
   })
 
   on('session.end', async ($, e, next) => {

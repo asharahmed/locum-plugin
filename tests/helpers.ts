@@ -32,7 +32,7 @@ export const TASK = [{ role: 'user', content: [{ type: 'text', text: 'Do the tas
 
 const BASH = [{ name: 'Bash', description: 'Run a command', mcp: false }]
 
-export function engine(on: any, replies: string[], type = 'locum:cheap', messages: object[] = TASK, store: Record<string, unknown> = {}, tools: object[] = BASH, sessionModel = 'claude-opus-5-5') {
+export function engine(on: any, replies: string[], type = 'locum:cheap', messages: object[] = TASK, store: Record<string, unknown> = {}, tools: object[] = BASH, sessionModel = 'claude-opus-5-5', env: Record<string, string> = {}) {
   const clock = mock.clock(on)
   mock.store(on, store)
   mock.env(on, {
@@ -40,6 +40,7 @@ export function engine(on: any, replies: string[], type = 'locum:cheap', message
     HOME: '/home/t',
     ANTHROPIC_MODEL: 'opus',
     ANTHROPIC_CUSTOM_MODEL_OPTION: 'deepseek/deepseek-v4.1-flash-1017',
+    ...env,
   })
   on('session.model', () => ({ value: sessionModel }))
   on('agent.list', () => ({ value: [{ id: AGENT_ID, type, description: 'test', status: 'running' }] }))
@@ -48,12 +49,15 @@ export function engine(on: any, replies: string[], type = 'locum:cheap', message
   // The display calls the plugin makes; a headless engine answers them silently
   for (const call of ['ui.status', 'ui.log', 'ui.toast', 'ui.invalidate']) on(call, () => ({ value: undefined }))
   const requests: string[] = []
-  on('process.spawn', async function* (_$: unknown, e: { input?: string }) {
+  // Each curl call's argv and environment, beside its body in `requests`
+  const calls: { argv: string[]; env: Record<string, string> }[] = []
+  on('process.spawn', async function* (_$: unknown, e: { input?: string; argv: string[]; env?: Record<string, string> }) {
     requests.push(e.input ?? '')
+    calls.push({ argv: e.argv, env: e.env ?? {} })
     yield { stream: 'stdout', text: replies[Math.min(requests.length - 1, replies.length - 1)]! }
     return { value: { code: 0, signal: null } }
   })
-  return Object.assign(requests, { clock })
+  return Object.assign(requests, { clock, calls })
 }
 
 export async function step($: any, index = 0) {

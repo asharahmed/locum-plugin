@@ -2,6 +2,16 @@
 
 Locum was called openrouter-agents until 1.0.1.
 
+## 1.1.0
+
+- Direct providers. The new `direct` option lists labs to call through their own Anthropic-compatible APIs ahead of OpenRouter: `deepseek` (DeepSeek), `zai` (Z.ai), `dashscope` (Alibaba Model Studio, with `dashscopeBaseUrl` for a workspace URL) and `minimax` (MiniMax). Each needs its key in the environment. A failed direct request goes to OpenRouter for the same model, then to the fallback model; a direct route that keeps failing is skipped for a while.
+- Direct steps are priced from the labs' own price lists, with DeepSeek's peak-hour doubling, so the spend caps and history still hold.
+- `/locum` shows each agent's route and which listed labs have no key. Agent descriptions and the subagent header name the lab when a run goes direct.
+- New agents: `locum:qwen` (Qwen 3.8 Flash) and `locum:minimax` (MiniMax M3.1 Flash). `locum:glm` moves to GLM-5.3.
+- The `privacy` option doesn't apply to direct calls; the README says so and when direct is cheaper and when it isn't.
+- `scripts/live-regression.sh` has 14 scenarios: the minimax agent, and a deepseek run with `direct: deepseek` and a key DeepSeek refuses, which must finish through OpenRouter. An agent's check now runs its asserts instead of matching the exact wording of the last line. All 14 passed on Claude Code 2.1.310.
+- 55 tests: the direct URL, auth header, model ID and missing `provider` field; the key passed only in the environment; direct failure going to OpenRouter; a missing key or option staying on OpenRouter; `/locum` routes; peak pricing and the workspace URL.
+
 ## 1.0.1
 
 - Renamed from openrouter-agents to **Locum**: the plugin is `locum@ashar-local`, the agent types `locum:deepseek`, `locum:kimi`, `locum:glm`, `locum:cheap` and `locum:custom`, the command `/locum`, and the repository `claude-locum`. Behaviour is unchanged. README "Upgrading" says how to move saved options and the spend history across.

@@ -46,12 +46,13 @@ none='{}'
 allow='{"pluginConfigs":{"locum@ashar-local":{"options":{"autoMode":"allow"}}}}'
 refuse='{"pluginConfigs":{"locum@ashar-local":{"options":{"autoMode":"refuse"}}}}'
 capped='{"pluginConfigs":{"locum@ashar-local":{"options":{"maxRunUsd":0.00001}}}}'
+direct='{"pluginConfigs":{"locum@ashar-local":{"options":{"direct":"deepseek"}}}}'
 noZdr='{"pluginConfigs":{"locum@ashar-local":{"options":{"customModel":"qwen/qwen3.7-flash"}}}}'
 
 task() { echo "Use the Agent tool with subagent_type \"locum:$1\" and prompt \"In $work/$1 write calc.py with add(a, b) and mul(a, b) and asserts for both in a __main__ block that print ok, run it with python3, fix any failure, and report the output.\" Then reply with its report."; }
 
 echo "== running scenarios in parallel (a few minutes)"
-for a in deepseek kimi glm cheap; do run "$a" acceptEdits "$none" -- "$(task "$a")" & done
+for a in deepseek kimi glm cheap minimax; do run "$a" acceptEdits "$none" -- "$(task "$a")" & done
 run auto auto "$allow" -- "Use the Agent tool with subagent_type \"locum:cheap\" and prompt \"Use Bash to run: echo auto-ok. Report the output.\" When it finishes, reply with the exact report you received, including the bracketed note." &
 run refused auto "$refuse" -- 'Use the Agent tool with subagent_type "locum:cheap" and prompt "Reply: ok". Report exactly what the Agent tool returned.' &
 run main acceptEdits "$none" --model deepseek/deepseek-v4.1-flash-1017 -- "Write $work/main/hello.py that prints hello, run it with python3, and tell me the output and which model you are." &
@@ -59,13 +60,20 @@ run cap acceptEdits "$capped" -- 'Use the Agent tool with subagent_type "locum:c
 run privacy acceptEdits "$noZdr" -- 'Use the Agent tool with subagent_type "locum:custom" and prompt "Reply: ok". Report exactly what the agent returned.' &
 run guard acceptEdits "$none" -- "Use the Agent tool with subagent_type \"locum:cheap\" and prompt \"Step 1: use Write to create $HOME/Downloads/or-guard-check.txt containing x. Step 2, whatever happened: use Bash to run exactly: ls -la ~/Downloads/or-guard-check.txt. Report what each tool returned.\" Then reply with its report." &
 run command acceptEdits "$none" -- "/locum" &
+# A direct route with a key DeepSeek refuses: the step must go on through OpenRouter
+mkdir -p "$work/direct"
+DEEPSEEK_API_KEY=locum-invalid-key run direct acceptEdits "$direct" -- "$(task direct | sed 's/locum:direct/locum:deepseek/')" &
 wait
 
-for a in deepseek kimi glm cheap; do
-  out=$(cd "$work/$a" && python3 calc.py 2>&1 | tail -1)
+for a in deepseek kimi glm cheap minimax; do
+  # The asserts must pass; the wording of the last line is the model's ("ok", "mul ok")
+  out=$(cd "$work/$a" && python3 calc.py > /dev/null 2>&1 && echo ok || echo failed)
   leaks=$(subagent_leaks "$a"); hf=$(hook_failures "$a")
   check "agent $a" "$([ "$out" = ok ] && [ "$leaks" = 0 ] && [ "$hf" = 0 ] && echo 1 || echo 0)" "(calc.py: $out; subagent steps to Anthropic: $leaks; hook failures: $hf)"
 done
+out=$(cd "$work/direct" && python3 calc.py > /dev/null 2>&1 && echo ok || echo failed)
+tried=$(grep -c 'DeepSeek direct failed' "$work/direct/debug.log" || true)
+check "direct, refused key" "$([ "$out" = ok ] && [ "$tried" -gt 0 ] && [ "$(subagent_leaks direct)" = 0 ] && echo 1 || echo 0)" "(calc.py: $out; direct failures sent on to OpenRouter: $tried)"
 r=$(result auto)
 check "auto mode, allow" "$(echo "$r" | grep -q 'Auto mode did not review' && echo "$r" | grep -q 'auto-ok' && [ "$(subagent_leaks auto)" = 0 ] && echo 1 || echo 0)" "(labelled report delivered)"
 check "auto mode, refuse" "$(result refused | grep -q "can't run in auto mode" && echo 1 || echo 0)" "(spawn refused)"

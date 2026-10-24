@@ -1,6 +1,6 @@
 # Locum
 
-Locum lets other models do Claude's job inside Claude Code. A *locum tenens* is a doctor who covers for another, working in the same practice with its patients, records and rules. Here the practice is Claude Code: the agents Locum adds use its tools, permissions, transcripts and subagent view exactly as a native subagent does. Only the model doing the work is different, reached through [OpenRouter](https://openrouter.ai).
+Locum lets other models do Claude's job inside Claude Code. A *locum tenens* is a doctor who covers for another, working in the same practice with its patients, records and rules. Here the practice is Claude Code: the agents Locum adds use its tools, permissions, transcripts and subagent view exactly as a native subagent does. Only the model doing the work is different, reached through [OpenRouter](https://openrouter.ai) or, for DeepSeek, GLM, Qwen and MiniMax models, the lab's own API.
 
 Your Claude login and model stay the default. You hand work to a Locum agent when you want a cheaper model, a second opinion from another model family, or the whole session on another model for a while.
 
@@ -33,8 +33,10 @@ Your Claude login and model stay the default. You hand work to a Locum agent whe
 |---|---|---|
 | `locum:deepseek` | DeepSeek V4.1 Flash 1017 | the default: coding, research, multi-step tasks |
 | `locum:kimi` | Kimi K3 | a second opinion from another model family |
-| `locum:glm` | GLM-5.2 | design and planning |
+| `locum:glm` | GLM-5.3 | design and planning |
 | `locum:cheap` | DeepSeek V4 Flash 0731 | tests and simple tasks, at about $0.04 per million input tokens |
+| `locum:qwen` | Qwen 3.8 Flash | a cheap model that reads images; best with Alibaba's key (see Direct providers) |
+| `locum:minimax` | MiniMax M3.1 Flash | agentic coding at DeepSeek's price; tied with it on the same coding benchmark |
 | `locum:custom` | any OpenRouter model you set | trying a model out |
 
 Each one is a native subagent. The Agent tool starts it, its tool calls run through Claude Code's own tools and permission rules, and its transcript opens from the tasks list with its real model named. It gets what a native subagent's request carries: Claude Code's context blocks (environment, date, `CLAUDE.md` when the agent gets it), the native subagent tool set, and its reasoning streamed live.
@@ -69,10 +71,12 @@ Change them with `/plugin configure locum@ashar-local`.
 | `privacy` | `zero-retention` | Which providers may serve Locum's requests: `zero-retention` (providers that keep no prompts), `no-data-collection` (none that store or train on prompts) or `off`. The agents send your files and command output to the provider. |
 | `maxRunUsd` | 0.5 | A run that has spent this much stops before its next step, with a report saying so. 0 turns the cap off. |
 | `maxSessionUsd` | 3 | Once a session's OpenRouter spend reaches this, new agents are refused and running ones stop. 0 turns the cap off. |
+| `direct` | empty | Labs to call directly for the models they serve: any of `deepseek`, `zai`, `dashscope`, `minimax`. See Direct providers. |
+| `dashscopeBaseUrl` | empty | Your Alibaba Model Studio workspace's Anthropic-compatible URL, if the international default doesn't take your key. |
 | `fallbackModel` | DeepSeek V4 Flash 0731 | A step whose model keeps failing (outage, rate limit, provider error) is retried once on this model, never a Claude model. |
 | `autoMode` | `refuse` | Whether Locum agents run in auto mode (see below). |
 | `lowBalanceUsd` | 5 | A notice at session start when the balance or the key's limit is below this. 0 turns it off. |
-| `<agent>Model`, `<agent>Effort` | per agent | The model behind deepseek, kimi, glm and cheap, and the reasoning effort when the Agent call names none. Kimi defaults to low, since its output is expensive. |
+| `<agent>Model`, `<agent>Effort` | per agent | The model behind deepseek, kimi, glm, cheap, qwen and minimax, and the reasoning effort when the Agent call names none. Kimi defaults to low, since its output is expensive. |
 | `customModel`, `customLabel`, `customEffort` | empty | Set `customModel` to any OpenRouter model ID and `locum:custom` runs on it. |
 
 ## Cost and reliability
@@ -82,6 +86,34 @@ Change them with `/plugin configure locum@ashar-local`.
 - Retryable errors are retried. OpenRouter's "could not verify available credits … retry shortly" is retried with a smaller output cap, since it checks the balance against a request's worst case. After 3 failed steps in a row a model is skipped for 2 minutes, so steps go straight to the fallback.
 - Model capabilities come from OpenRouter's list at session start. A model without reasoning support gets no thinking budget, one without tool calls is refused with a clear message, and an ID OpenRouter doesn't know isn't hidden behind the fallback model.
 - Claude Code's own cost summary doesn't see OpenRouter spend. `/locum` and each run's closing line do.
+
+## Direct providers
+
+OpenRouter charges the lab's own per-token price for a model the lab serves there. What it adds is a 5.5% fee when you buy credit. With the `direct` option, a model whose lab is listed goes to that lab's Anthropic-compatible API first:
+
+| `direct` entry | Lab | Key in the environment | Models it takes |
+|---|---|---|---|
+| `deepseek` | DeepSeek | `DEEPSEEK_API_KEY` | DeepSeek V4.1 Flash (as `deepseek-flash`), V4 Pro |
+| `zai` | Z.ai | `ZAI_API_KEY` | GLM-5.3, GLM-5.3 Flash |
+| `dashscope` | Alibaba Model Studio | `DASHSCOPE_API_KEY` | Qwen 3.8 Flash, Qwen 3.8 Max |
+| `minimax` | MiniMax | `MINIMAX_API_KEY` | MiniMax M3.1 Flash |
+
+```
+export DEEPSEEK_API_KEY=sk-...
+```
+
+then `direct: deepseek` in `/plugin configure locum@ashar-local`. `/locum` shows each agent's route and names any listed lab whose key is missing.
+
+- A direct request that fails (bad key, empty balance, an outage, a model ID the lab doesn't take) is sent again through OpenRouter for the same model, then the fallback model as before. A direct route that fails 3 steps in a row is skipped for 2 minutes.
+- Direct APIs don't report cost, so Locum prices direct steps from the labs' October 2026 price lists (`hooks/providers.ts`). DeepSeek's doubled peak-hour prices (01:00–04:00 and 06:00–10:00 UTC on weekdays) are counted. The caps apply as usual.
+- **Privacy:** the `privacy` option filters OpenRouter's providers only. A direct call goes to the lab under its own terms. Leave `direct` empty if that matters for your code.
+- Compaction of a main session on an OpenRouter model still goes through OpenRouter.
+
+Direct is cheaper in some cases and dearer in others:
+
+- Worth it for DeepSeek and MiniMax when you top up often (no 5.5% fee), and for Qwen 3.8 Flash, which only Alibaba serves and which OpenRouter's zero-retention filter excludes, so with `privacy: zero-retention` it runs only direct.
+- Worth it for GLM if you have Z.ai's GLM Coding Plan: its key works at the same endpoint at a flat monthly price.
+- Not worth it for GLM-5.3 at Z.ai's per-token price ($1.40/$4.40 per million). Other hosts on OpenRouter serve it for much less (Wafer at $0.08/$1.40 in October 2026), and `/locum models z-ai/glm` shows the current prices.
 
 ## Auto mode
 
@@ -94,7 +126,7 @@ With `autoMode: allow`, actions the check would have reviewed run unreviewed. On
 - Nothing falls back to your Claude model. If Locum's own step code fails, the step ends with an error, and an agent the settings no longer have stops instead of carrying on.
 - A path refused to Write, Edit, NotebookEdit or Read is refused to Bash commands that name it, whether absolute, relative, `~/…` or after a `cd`. It's best-effort: a command that builds the path from a variable, a glob or a script isn't caught, and it doesn't apply to the main session.
 - The agents' system prompt tells them not to work around a refusal or a tool they can't use.
-- Your API key reaches `curl` through its environment, never its command line.
+- API keys (OpenRouter's and the labs') reach `curl` through its environment, never its command line.
 - Per-run state lives in Claude Code's session state, so `/reload-plugins` mid-run keeps it.
 
 ## Limits
@@ -136,6 +168,6 @@ To confirm nothing reaches Anthropic, start Claude Code with `--debug-file /tmp/
 
 - `hooks/register.tsx` wires the hooks. `agents.ts` holds the agents and settings, `openrouter.ts` the streaming client, `messages.ts` what the model is sent, `commands.ts` `/locum` with the spend ledger and `use` choices, `guard.ts` the path guard, `state.ts` the run state, and `schemas.ts` the generated tool schemas. `types/index.d.ts` declares the state.
 - `scripts/check.sh` validates the plugin, type-checks it against the installed Claude Code's plugin API, and runs the 49 tests, which feed recorded OpenRouter streams through the hooks with the engine stood in for, so they spend nothing. It exits non-zero on any failure.
-- `scripts/live-regression.sh` runs twelve scenarios against real OpenRouter for a few cents: each agent on a small coding task, auto mode with `allow` and `refuse`, the main session on OpenRouter, the run cap, the privacy setting, the path guard, `/locum`, and compaction across resumes. It reruns the files the agents wrote and checks that no step of an OpenRouter loop went to Anthropic. Run it before a release.
+- `scripts/live-regression.sh` runs fourteen scenarios against real OpenRouter for a few cents: each agent on a small coding task, a direct route whose key is refused (it must finish through OpenRouter), auto mode with `allow` and `refuse`, the main session on OpenRouter, the run cap, the privacy setting, the path guard, `/locum`, and compaction across resumes. It reruns the files the agents wrote and checks that no step of an OpenRouter loop went to Anthropic. Run it before a release.
 - `scripts/gen-schemas.py <path to claude-code.d.ts>` regenerates the tool schemas (needs npx; the type file is written when Claude Code's plugin-authoring skill loads).
 - Turn Locum off with `claude plugin disable locum@ashar-local`; remove it with `claude plugin uninstall locum@ashar-local`.

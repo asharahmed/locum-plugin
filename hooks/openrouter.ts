@@ -281,8 +281,15 @@ export async function balanceOf($: EngineInterface, key: string) {
 }
 
 // One request run to the end with nothing shown: its text, or the failure
-export async function completeText($: EngineInterface, key: string, body: Record<string, unknown>, signal: AbortSignal) {
-  const stream = streamStep($, { key, body, isAuto: false, signal, onBlock: () => {}, onRetry: () => {} })
+export async function completeText(
+  $: EngineInterface,
+  key: string,
+  body: Record<string, unknown>,
+  signal: AbortSignal,
+  // A lab's own API in place of OpenRouter
+  to: { url?: string; auth?: 'bearer' | 'x-api-key' } = {},
+) {
+  const stream = streamStep($, { key, body, isAuto: false, signal, onBlock: () => {}, onRetry: () => {}, ...to })
   for (;;) {
     const r = await stream.next()
     if (r.done) return r.value

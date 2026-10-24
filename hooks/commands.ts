@@ -121,6 +121,8 @@ const HELP = [
   '  /locum use <agent> <model> run an agent on another OpenRouter model (kept across sessions; takes effect after /reload-plugins)',
   '  /locum use <agent> default back to the configured model',
   '  /locum setup               which keys are set, where to get the others, and how to add them',
+  '  /locum update              whether a newer release is out, and what changed',
+  '  /locum update install      install it (only when you type it)',
   '  /locum help                this list',
 ]
 
@@ -153,6 +155,7 @@ export async function runCommand(
   health: ReadonlyMap<string, Health> = new Map(),
   routes: Readonly<Record<string, string>> = {},
   labKeys: Readonly<Record<string, boolean>> = {},
+  updateLine = '',
 ): Promise<string> {
   const [sub = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
   const key = await openRouterKey($, settings.keys)
@@ -217,6 +220,7 @@ export async function runCommand(
   const lines = [
     `Locum${version ? ` ${version}` : ''}: Claude Code agents on other labs' models`,
     money,
+    ...(updateLine ? [updateLine] : []),
     `This session: ${runs.length} run${runs.length === 1 ? '' : 's'}, ${usd(spent)} spent. Caps: ${settings.maxRunUsd > 0 ? usd(settings.maxRunUsd) : 'none'} per run, ${settings.maxSessionUsd > 0 ? usd(settings.maxSessionUsd) : 'none'} per session.`,
     `Settings: privacy ${settings.privacy}, auto mode ${settings.autoMode}, fallback model ${settings.fallbackModel}.`,
     await mainSessionLine($, mainModel),
@@ -226,6 +230,7 @@ export async function runCommand(
       ([name, a]) =>
         `  ${name.padEnd(9)} ${a.model} · effort ${a.effort}${routes[name] ? ` · ${routes[name]}` : a.providers ? ` · providers ${a.providers.join(', ')}` : ''}${a.vision ? '' : ' · no images'}${overrides[name] ? ' · set with /locum use' : ''}`,
     ),
+    ...(Object.keys(routes).length ? ['  Route prices are per million input tokens of a typical step (mostly cached), OpenRouter\'s with its 5.5% credit fee.'] : []),
     `  Keys: OpenRouter ${key ? 'set' : 'not set'} · ${Object.values(PROVIDERS).map(p => `${p.label} ${labKeys[p.id] ? 'set' : 'not set'}`).join(' · ')}. /locum setup says how to add them.`,
     ...(!settings.direct.length
       ? ['  Direct calls to the labs are off (option `direct`).']
@@ -238,8 +243,9 @@ export async function runCommand(
   ]
   if (health.size) {
     const now = await $.clock.now()
-    lines.push('', 'Model health this session:')
-    for (const [model, h] of health) {
+    lines.push('', 'Health by route this session:')
+    for (const [route, h] of health) {
+      const model = route.includes(' via ') ? route : `${route} via OpenRouter`
       const latency = h.ok ? ` · ${(h.ms / h.ok / 1000).toFixed(1)}s per step` : ''
       const failing = h.fails ? ` · ${h.fails} failed step${h.fails === 1 ? '' : 's'}${h.lastError ? ` (last: ${h.lastError.slice(0, 70)})` : ''}` : ''
       const skipping = h.skipUntil && h.skipUntil > now ? ` · skipped for ${Math.ceil((h.skipUntil - now) / 1000)}s more, steps go to the fallback` : ''

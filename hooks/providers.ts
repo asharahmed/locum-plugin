@@ -7,6 +7,9 @@ export type Price = { input: number; cacheRead: number; output: number }
 export type Provider = {
   id: string
   label: string
+  // How OpenRouter names the lab among a model's providers (its listing there
+  // carries the lab's own price)
+  orName: string
   // Anthropic-compatible base URLs; `/v1/messages` is appended. Keys are bound
   // to a region, so a key the first refuses is tried at the others in turn.
   baseUrls: string[]
@@ -40,11 +43,12 @@ export const PROVIDERS: Record<string, Provider> = {
   deepseek: {
     id: 'deepseek',
     label: 'DeepSeek',
+    orName: 'DeepSeek',
     baseUrls: ['https://api.deepseek.com/anthropic'],
     keyEnv: 'DEEPSEEK_API_KEY',
     keyOption: 'deepseekApiKey',
     keyPage: 'https://platform.deepseek.com/api_keys',
-    why: 'the deepseek agent, without the 5.5% fee OpenRouter adds to credit',
+    why: 'the deepseek agent: a second route, taken when it costs less than OpenRouter',
     auth: 'x-api-key',
     models: {
       'deepseek/deepseek-v4.1-flash-1017': { id: 'deepseek-flash', price: perM(0.15, 0.003, 0.6) },
@@ -57,12 +61,13 @@ export const PROVIDERS: Record<string, Provider> = {
   zai: {
     id: 'zai',
     label: 'Z.ai',
+    orName: 'Z.AI',
     // International, then Zhipu's mainland endpoint; a GLM Coding Plan key works at the same URLs
     baseUrls: ['https://api.z.ai/api/anthropic', 'https://open.bigmodel.cn/api/anthropic'],
     keyEnv: 'ZAI_API_KEY',
     keyOption: 'zaiApiKey',
     keyPage: 'https://z.ai/manage-apikey/apikey-list',
-    why: 'the glm agent; only worth it with a GLM Coding Plan, since OpenRouter hosts GLM for less per token',
+    why: 'the glm agent: worth it with a GLM Coding Plan (then set direct to always), since OpenRouter hosts GLM for less per token',
     auth: 'bearer',
     models: {
       'z-ai/glm-5.3': { id: 'glm-5.3', price: perM(1.4, 0.26, 4.4) },
@@ -72,6 +77,7 @@ export const PROVIDERS: Record<string, Provider> = {
   dashscope: {
     id: 'dashscope',
     label: 'Alibaba Model Studio',
+    orName: 'Alibaba',
     // Singapore, Virginia, Beijing, Hong Kong, then the Coding Plan's host. A
     // workspace URL can replace them all (option `dashscopeBaseUrl`).
     baseUrls: [
@@ -94,12 +100,13 @@ export const PROVIDERS: Record<string, Provider> = {
   minimax: {
     id: 'minimax',
     label: 'MiniMax',
+    orName: 'Minimax',
     // International, then mainland China
     baseUrls: ['https://api.minimax.io/anthropic', 'https://api.minimaxi.com/anthropic'],
     keyEnv: 'MINIMAX_API_KEY',
     keyOption: 'minimaxApiKey',
     keyPage: 'https://platform.minimax.io (API Keys)',
-    why: 'the minimax agent, without the 5.5% fee',
+    why: 'the minimax agent: a second route, taken when it costs less than OpenRouter',
     auth: 'bearer',
     models: {
       // MiniMax's docs and guides disagree on this ID; a wrong one falls to OpenRouter

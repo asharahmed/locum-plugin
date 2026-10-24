@@ -133,5 +133,5 @@ test('a model that keeps failing is skipped for a while, so steps go straight to
   expect(JSON.parse(requests[12]!).model).toBe('deepseek/deepseek-v4.1-flash-1017')
   expect(result.answer).toBe('fallback answer')
   const out: any = await $.command.run({ command: 'locum', args: '' } as never)
-  expect(String(out.text)).toMatch(/deepseek\/deepseek-v4-flash-0731: 0 steps · 3 failed steps .*skipped for \d+s more/)
+  expect(String(out.text)).toMatch(/deepseek\/deepseek-v4-flash-0731 via OpenRouter: 0 steps · 3 failed steps .*skipped for \d+s more/)
 })

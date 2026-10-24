@@ -72,16 +72,29 @@ export async function step($: any, index = 0) {
 export const RETRYABLE = '{"error":{"message":"upstream overloaded"}}\n__STATUS__503\n'
 
 // Session start's calls: agent and command registration, and the model list
-export function sessionStart(on: any, models: object[] = []) {
+// `pages` answers other fetches by the end of their URL (OpenRouter's endpoint
+// lists, GitHub's latest release)
+export function sessionStart(on: any, models: object[] = [], pages: Record<string, object> = {}) {
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
   on('agent.register', (_$: unknown, e: { name: string }) => ({ value: { agent: `locum:${e.name}` } }))
   on('command.register', (_$: unknown, e: { name: string }) => ({ value: { command: e.name } }))
-  on('http.fetch', (_$: unknown, e: { url: string }) => ({
-    value: e.url.endsWith('/models')
-      ? { status: 200, ok: true, headers: {}, text: JSON.stringify({ data: models }) }
-      : { status: 500, ok: false, headers: {}, text: '' },
-  }))
+  on('http.fetch', (_$: unknown, e: { url: string }) => {
+    const page = Object.entries(pages).find(([end]) => e.url.endsWith(end))
+    if (page) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(page[1]) } }
+    return {
+      value: e.url.endsWith('/models')
+        ? { status: 200, ok: true, headers: {}, text: JSON.stringify({ data: models }) }
+        : { status: 500, ok: false, headers: {}, text: '' },
+    }
+  })
 }
+
+// One OpenRouter endpoint row, prices per million tokens
+export const endpoint = (model: string, provider: string, input: number, output: number, cache = input) => ({
+  model_id: model,
+  provider_name: provider,
+  pricing: { prompt: String(input / 1e6), completion: String(output / 1e6), input_cache_read: String(cache / 1e6) },
+})
 
 export const MODELS = [
   { id: 'deepseek/deepseek-v4-flash-0731', pricing: { prompt: '0.000000044', completion: '0.000000133' }, context_length: 1048576, architecture: { input_modalities: ['text'] }, supported_parameters: ['tools', 'reasoning'] },

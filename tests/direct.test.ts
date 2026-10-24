@@ -67,7 +67,7 @@ test('/locum names each agent\'s route and which keys are set', DIRECT, async ($
   sessionStart(on, MODELS)
   await begin($)
   const out = String(((await $.command.run({ command: 'locum', args: '' } as never)) as any).text)
-  expect(out).toMatch(/deepseek .*direct via DeepSeek \(deepseek-flash\), then OpenRouter/)
+  expect(out).toMatch(/deepseek .*DeepSeek direct \$0\.070, then OpenRouter price unknown/)
   expect(out).toMatch(/Keys: OpenRouter set · DeepSeek set · Z\.ai not set/)
   expect(out).toMatch(/\/locum setup says how/)
   expect(out).toMatch(/privacy setting doesn't cover them/)

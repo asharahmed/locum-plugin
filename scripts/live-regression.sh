@@ -46,7 +46,8 @@ none='{}'
 allow='{"pluginConfigs":{"locum@asharahmed":{"options":{"autoMode":"allow"}}}}'
 refuse='{"pluginConfigs":{"locum@asharahmed":{"options":{"autoMode":"refuse"}}}}'
 capped='{"pluginConfigs":{"locum@asharahmed":{"options":{"maxRunUsd":0.00001}}}}'
-direct="$none"
+# The lab first, so the refused key is tried before OpenRouter
+direct='{"pluginConfigs":{"locum@asharahmed":{"options":{"direct":"always"}}}}'
 noZdr='{"pluginConfigs":{"locum@asharahmed":{"options":{"customModel":"qwen/qwen3.7-flash"}}}}'
 
 task() { echo "Use the Agent tool with subagent_type \"locum:$1\" and prompt \"In $work/$1 write calc.py with add(a, b) and mul(a, b) and asserts for both in a __main__ block that print ok, run it with python3, fix any failure, and report the output.\" Then reply with its report."; }
@@ -60,6 +61,8 @@ run cap acceptEdits "$capped" -- 'Use the Agent tool with subagent_type "locum:c
 run privacy acceptEdits "$noZdr" -- 'Use the Agent tool with subagent_type "locum:custom" and prompt "Reply: ok". Report exactly what the agent returned.' &
 run guard acceptEdits "$none" -- "Use the Agent tool with subagent_type \"locum:cheap\" and prompt \"Step 1: use Write to create $HOME/Downloads/or-guard-check.txt containing x. Step 2, whatever happened: use Bash to run exactly: ls -la ~/Downloads/or-guard-check.txt. Report what each tool returned.\" Then reply with its report." &
 run command acceptEdits "$none" -- "/locum" &
+# Live prices: with a (placeholder) DeepSeek key, /locum prices both routes
+DEEPSEEK_API_KEY=locum-placeholder run prices acceptEdits "$none" -- "/locum" &
 # A direct route with a key DeepSeek refuses: the step must go on through OpenRouter
 mkdir -p "$work/direct"
 DEEPSEEK_API_KEY=locum-invalid-key run direct acceptEdits "$direct" -- "$(task direct | sed 's/locum:direct/locum:deepseek/')" &
@@ -72,7 +75,7 @@ for a in deepseek kimi glm cheap minimax; do
   check "agent $a" "$([ "$out" = ok ] && [ "$leaks" = 0 ] && [ "$hf" = 0 ] && echo 1 || echo 0)" "(calc.py: $out; subagent steps to Anthropic: $leaks; hook failures: $hf)"
 done
 out=$(cd "$work/direct" && python3 calc.py > /dev/null 2>&1 && echo ok || echo failed)
-tried=$(grep -c 'DeepSeek direct failed' "$work/direct/debug.log" || true)
+tried=$(grep -c 'failed (HTTP 401.*trying OpenRouter' "$work/direct/debug.log" || true)
 check "direct, refused key" "$([ "$out" = ok ] && [ "$tried" -gt 0 ] && [ "$(subagent_leaks direct)" = 0 ] && echo 1 || echo 0)" "(calc.py: $out; direct failures sent on to OpenRouter: $tried)"
 r=$(result auto)
 check "auto mode, allow" "$(echo "$r" | grep -q 'Auto mode did not review' && echo "$r" | grep -q 'auto-ok' && [ "$(subagent_leaks auto)" = 0 ] && echo 1 || echo 0)" "(labelled report delivered)"
@@ -83,6 +86,8 @@ check "run spend cap" "$(result cap | grep -q -i 'spend cap' && echo 1 || echo 0
 check "privacy setting" "$(result privacy | grep -q 'meets the privacy setting' && echo 1 || echo 0)" "(model without zero-retention providers refused)"
 check "path guard" "$(grep -q 'was refused to a file tool' "$work/guard/out.jsonl" && [ ! -e "$HOME/Downloads/or-guard-check.txt" ] && echo 1 || echo 0)" "(refused path refused to Bash)"
 check "/locum" "$(result command | grep -q 'Agents:' && echo 1 || echo 0)" "(overview shown)"
+line=$(result prices | grep -E '^  deepseek ' || true)
+check "live route prices" "$(echo "$line" | grep -qE 'DeepSeek direct \$0\.[0-9]+' && echo "$line" | grep -qE 'OpenRouter \([^)]+\) \$0\.[0-9]+' && echo 1 || echo 0)" "(${line#*· effort medium · })"
 
 # Compaction across resumes, on an OpenRouter main session
 M=deepseek/deepseek-v4.1-flash-1017

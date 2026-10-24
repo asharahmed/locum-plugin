@@ -30,7 +30,7 @@
     "deepseekApiKey": {
       "type": "string",
       "title": "DeepSeek API key",
-      "description": "From platform.deepseek.com. The deepseek agent then calls DeepSeek directly, without OpenRouter's 5.5% credit fee, under DeepSeek's own data terms. Empty: DEEPSEEK_API_KEY, else OpenRouter.",
+      "description": "From platform.deepseek.com. Adds DeepSeek's own API as a second route for the deepseek agent; each step takes whichever route costs less. Direct calls follow DeepSeek's data terms. Empty: DEEPSEEK_API_KEY, else OpenRouter only.",
       "sensitive": true,
       "default": ""
     },
@@ -44,14 +44,14 @@
     "minimaxApiKey": {
       "type": "string",
       "title": "MiniMax API key",
-      "description": "From platform.minimax.io or minimaxi.com. The minimax agent then calls MiniMax directly. Empty: MINIMAX_API_KEY, else OpenRouter.",
+      "description": "From platform.minimax.io or minimaxi.com. Adds MiniMax's own API as a second route for the minimax agent; each step takes whichever costs less. Empty: MINIMAX_API_KEY, else OpenRouter only.",
       "sensitive": true,
       "default": ""
     },
     "zaiApiKey": {
       "type": "string",
       "title": "Z.ai API key",
-      "description": "Worth it with a GLM Coding Plan (flat monthly price). At Z.ai's per-token prices GLM is cheaper through OpenRouter. Empty: ZAI_API_KEY, else OpenRouter.",
+      "description": "Worth it with a GLM Coding Plan (flat monthly price): set Direct calls to always. Per token, OpenRouter's hosts serve GLM for less, so with cheapest it's a backup route. Empty: ZAI_API_KEY, else OpenRouter only.",
       "sensitive": true,
       "default": ""
     },
@@ -97,12 +97,24 @@
     "direct": {
       "type": "string",
       "title": "Direct calls to the labs",
-      "description": "auto: a model whose lab you gave a key goes to that lab first, then OpenRouter if it fails. off: everything through OpenRouter.",
+      "description": "cheapest: each step goes first to whichever is cheaper at that moment, the lab (with your key) or OpenRouter, and the other is the backup. always: the lab first whenever you have its key (for a flat-price plan such as GLM's Coding Plan). off: everything through OpenRouter.",
       "options": [
+        "cheapest",
+        "always",
+        "off"
+      ],
+      "default": "cheapest"
+    },
+    "updates": {
+      "type": "string",
+      "title": "Updates",
+      "description": "notify: a notice when a new Locum release is out; /locum update shows it and /locum update install installs it. auto: install new releases at session start without asking (choosing this gives Locum that permission). off: no checks.",
+      "options": [
+        "notify",
         "auto",
         "off"
       ],
-      "default": "auto"
+      "default": "notify"
     },
     "dashscopeBaseUrl": {
       "type": "string",

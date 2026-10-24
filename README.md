@@ -32,6 +32,7 @@ Your Claude login and model stay the default. Hand work to a Locum agent when yo
 - [Switching the main session](#switching-the-main-session)
 - [The /locum command](#the-locum-command)
 - [Keys and direct providers](#keys-and-direct-providers)
+- [Updates](#updates)
 - [Settings](#settings)
 - [Cost and reliability](#cost-and-reliability)
 - [Auto mode](#auto-mode)
@@ -113,28 +114,35 @@ In a switched session, Claude Code may run its built-in subagents (general-purpo
 | `/locum setup` | Which keys are set, where to get the others, and how to add them. |
 | `/locum models [search]` | Tool-capable OpenRouter models, cheapest first, with price, context size, image support and reasoning. |
 | `/locum use <agent> <model>` | Moves an agent to another model after `/reload-plugins`. The choice is kept across sessions until `/locum use <agent> default`. |
+| `/locum update` | Whether a newer release is out, and what changed. |
+| `/locum update install` | Installs it. Runs only when you type it. |
 | `/locum help` | This list. |
 
 ## Keys and direct providers
 
-An OpenRouter key runs every agent. OpenRouter charges each lab's own per-token price and adds a 5.5% fee when you buy credit.
+An OpenRouter key runs every agent. A lab's own key adds a second route for that lab's models, and Locum sends each step to whichever route costs less at that moment, with the other as the backup. Each key has a field in `/plugin configure locum@asharahmed`, and nothing else needs setting.
 
-A lab's own key sends that lab's models straight to it, with OpenRouter as the backup. Each key has a field in `/plugin configure locum@asharahmed`, and nothing else needs setting.
+At session start Locum reads OpenRouter's public price lists: the providers that meet your privacy setting, and the lab's own listing, which carries the lab's price. It compares the cost of a typical step, which is mostly cached input, adds OpenRouter's 5.5% credit fee to OpenRouter's side, and counts DeepSeek's doubled peak-hour prices. `/locum` shows both prices for each agent and which goes first.
 
-| Key | Models | Is it worth adding? |
-| --- | --- | --- |
-| DeepSeek | DeepSeek V4.1 Flash, V4 Pro | Yes. It avoids the 5.5% fee. |
-| Alibaba Model Studio | Qwen 3.8 Flash, Qwen 3.8 Max | Yes, for `locum:qwen`. OpenRouter has no zero-retention host for Qwen, so under the default privacy setting Qwen runs only with this key. |
-| MiniMax | MiniMax M3.1 Flash | Yes. It avoids the 5.5% fee. |
-| Z.ai | GLM-5.3, GLM-5.3 Flash | Only with a GLM Coding Plan. Per token, other OpenRouter hosts serve GLM-5.3 for less: $0.08/$1.40 per million at Wafer against $1.40/$4.40 at Z.ai in October 2026. |
+OpenRouter's third-party hosts are often cheaper than the labs themselves. On 24 October 2026, with zero-retention privacy:
+
+| Agent | Through OpenRouter | Direct | First |
+| --- | --- | --- | --- |
+| `locum:deepseek` | $0.066 (DeepInfra) | $0.070 | OpenRouter |
+| `locum:minimax` | $0.058 (Relace) | $0.079 | OpenRouter |
+| `locum:glm` | $0.180 (Wafer) | $0.765 | OpenRouter |
+| `locum:qwen` | no zero-retention host | $0.073 | Direct |
+
+Prices are per million input tokens of a typical step. So a lab key mostly serves as a backup route, and as the only route for Qwen under the default privacy setting. A GLM Coding Plan is the exception: it charges a flat monthly price, so with that key set `direct` to `always`.
 
 How direct calls behave:
 
 - Alibaba, MiniMax and Z.ai keys belong to one region. Locum tries the lab's regional endpoints until one accepts the key, then keeps using it. A workspace-dedicated Alibaba URL goes in `dashscopeBaseUrl`.
-- A failed direct request is retried through OpenRouter on the same model. A key that a lab refuses everywhere gets one notice, and Locum stops using it for the rest of the session.
+- A step that fails on its first route before any output moves to the other. A key that a lab refuses everywhere gets one notice, and Locum stops using it for the rest of the session.
+- Compaction takes the same routes as a step, so a main session on a lab's model compacts without an OpenRouter key.
 - Without an OpenRouter key, the models of labs you have keys for still run. The other agents report which key to add.
 - The `privacy` setting filters OpenRouter's providers only. A direct call is covered by the lab's own data terms. Set `direct` to `off` to send everything through OpenRouter.
-- Direct APIs don't report cost, so Locum prices those calls from the labs' published rates, including DeepSeek's doubled peak-hour prices. The spend caps apply as usual.
+- Direct APIs don't report cost, so Locum prices those calls from the lab's price on OpenRouter, or its own table when that's missing. The spend caps apply as usual.
 
 Keys can also come from the environment for any field left empty: `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `DASHSCOPE_API_KEY`, `MINIMAX_API_KEY` and `ZAI_API_KEY`. To store a key from a terminal without it reaching your shell history:
 
@@ -142,6 +150,14 @@ Keys can also come from the environment for any field left empty: `OPENROUTER_AP
 read -rs K && printf '{"deepseekApiKey":"%s"}' "$K" \
   | claude plugin configure locum@asharahmed --values-stdin; unset K
 ```
+
+## Updates
+
+Locum checks GitHub for a new release twice a day and shows one notice per version. `/locum update` shows what changed. `/locum update install` installs it through Claude Code's own plugin commands, and `/reload-plugins` loads it.
+
+An install runs only when you type the command yourself, at the terminal or through Remote Control. Locum refuses one that the model or another plugin runs.
+
+Set `updates` to `auto` to have new releases installed at session start without asking. Choosing it is the permission. `off` stops the checks. A copy read from a folder, such as a clone, is never changed: Locum tells you to `git pull` there instead.
 
 ## Settings
 
@@ -151,7 +167,8 @@ Open them with `/plugin configure locum@asharahmed`.
 | --- | --- | --- |
 | API keys | empty | OpenRouter, DeepSeek, Alibaba, MiniMax and Z.ai. Stored in the keychain. |
 | `privacy` | `zero-retention` | Which OpenRouter providers may serve requests: `zero-retention`, `no-data-collection` or `off`. |
-| `direct` | `auto` | `auto` sends a model to its lab when you have that lab's key. `off` sends everything through OpenRouter. |
+| `direct` | `cheapest` | `cheapest` sends each step to the cheaper of the lab and OpenRouter. `always` tries the lab first whenever you have its key. `off` sends everything through OpenRouter. |
+| `updates` | `notify` | `notify` shows a notice for a new release. `auto` installs it at session start. `off` stops the checks. |
 | `maxRunUsd` | `0.5` | A run stops once it has spent this much. `0` turns the cap off. |
 | `maxSessionUsd` | `3` | New agents are refused, and running ones stop, once a session has spent this much. `0` turns the cap off. |
 | `fallbackModel` | DeepSeek V4 Flash 0731 | A step whose model keeps failing is retried once on this model. It is never a Claude model. |
@@ -221,16 +238,19 @@ To check that nothing reaches Anthropic, start Claude Code with `--debug-file /t
 hooks/
   register.tsx   hook wiring
   agents.ts      agents and settings
-  providers.ts   direct providers: endpoints, model IDs, prices
+  providers.ts   direct providers: endpoints, model IDs, fallback prices
+  pricing.ts     live prices and the choice between lab and OpenRouter
+  updates.ts     release checks and installs
   openrouter.ts  streaming client
   messages.ts    what the model is sent
   commands.ts    /locum, the spend ledger and model choices
   guard.ts       path guard
   state.ts       run state
   schemas.ts     generated tool schemas
-tests/           61 tests on recorded streams; they spend nothing
+tests/           73 tests on recorded streams; they spend nothing
 scripts/
   check.sh            validate, type-check and test
+  release.sh          bump, check, push, wait for CI, tag and publish
   live-regression.sh  14 scenarios against the real APIs, a few cents a run
   gen-schemas.py      regenerate schemas.ts after a Claude Code update
 assets/          icon and social preview sources
@@ -238,7 +258,7 @@ assets/          icon and social preview sources
 
 - `scripts/check.sh` exits non-zero on any failure. GitHub Actions runs it on every push and pull request, without the type-check, because Claude Code's plugin type file isn't published.
 - Run `scripts/live-regression.sh` before a release. It reruns the code the agents wrote and checks that no step went to Anthropic.
-- To update, run `claude plugin marketplace update asharahmed`, then `/reload-plugins`.
+- To release, write the code and a `## x.y.z` section in `CHANGELOG.md`, commit everything except the CHANGELOG, then run `scripts/release.sh x.y.z`. It bumps the version and badge, runs the checks, pushes, waits for CI on that commit, and only then tags and publishes. `--dry-run` runs the checks and changes nothing.
 - To turn Locum off, run `claude plugin disable locum@asharahmed`. To remove it, run `claude plugin uninstall locum@asharahmed`.
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.

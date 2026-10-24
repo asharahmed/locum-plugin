@@ -20,7 +20,10 @@ import {
 } from './messages'
 import type { StepOutcome } from './openrouter'
 import { CONFIGURE, NO_KEY, balanceOf, completeText, openRouterKey, streamStep } from './openrouter'
-import type { Route } from './providers'
+import type { Endpoint } from './pricing'
+import { choose, loadPrices, openRouterEndpoint, withPrice } from './pricing'
+import { firstNotice, install, isFolderInstall, isNewer, latestRelease, pluginVersion, updateCommand } from './updates'
+import type { Price, Route } from './providers'
 import { PROVIDERS, directRoute, priceNow } from './providers'
 import { SUBAGENT_TOOLS } from './schemas'
 import { allRuns, getRun, loopRunOf, newRun, patchRun, putRun, runOf, sessionUsd } from './state'
@@ -81,8 +84,22 @@ export const register: Register = (on, options) => {
   const workingUrl: Record<string, string> = {}
   // Providers whose key every endpoint refused this session: OpenRouter from then on
   const refusedKey = new Set<string>()
-  const routeFor = (model: string) =>
-    directRoute(model, settings.direct.filter(id => !refusedKey.has(id)), directKeys, settings.baseUrls, workingUrl)
+  // Prices at session start (pricing.ts): each routable model's OpenRouter
+  // providers that meet the privacy setting, and the lab's own listed price
+  const orEndpoints = new Map<string, Endpoint[]>()
+  const labPrices = new Map<string, Price>()
+  const routeFor = (model: string) => {
+    const route = directRoute(model, settings.direct.filter(id => !refusedKey.has(id)), directKeys, settings.baseUrls, workingUrl)
+    return route && withPrice(route, labPrices.get(model))
+  }
+  // Which of the lab and OpenRouter goes first for an agent's step now
+  const choiceFor = (a: AgentDef, route: Route, now: number, hasOpenRouterKey: boolean) =>
+    choose(settings.directMode, priceNow(route, new Date(now)), openRouterEndpoint(orEndpoints.get(a.model), a.providers), hasOpenRouterKey)
+  // A request body for the lab: its own model ID, no OpenRouter-only preferences
+  const forLab = (body: Record<string, unknown>, route: Route) => {
+    const { provider: _, ...rest } = body
+    return { ...rest, model: route.model }
+  }
   // How a model is reached, for descriptions and headers
   const via = (model: string) => {
     const route = routeFor(model)
@@ -194,12 +211,32 @@ export const register: Register = (on, options) => {
         if (!listed.has(settings.fallbackModel)) missing.push(`fallbackModel (${settings.fallbackModel})`)
         if (missing.length) $.ui.toast(`OpenRouter has no model for: ${missing.join(', ')}. Check /plugin configure.`)
       }
+      const routable = [...new Set([...Object.values(agents).map(a => a.model), settings.fallbackModel])].flatMap(m => {
+        const route = routeFor(m)
+        return route ? [{ model: m, labName: route.provider.orName }] : []
+      })
+      await loadPrices($, routable, settings.privacy !== 'off', orEndpoints, labPrices).catch(() => {})
       if (!key || !(settings.lowBalanceUsd > 0)) return
       const { account, keyLeft } = await balanceOf($, key)
       const left = [account, keyLeft].filter((v): v is number => v !== undefined)
       if (left.length && Math.min(...left) < settings.lowBalanceUsd) {
         $.ui.toast(`OpenRouter balance is low: ${usd(Math.min(...left))} left. OpenRouter subagents may fail. Top up at ${TOP_UP}`)
       }
+    })().catch(() => {})
+
+    // New releases: a notice once per version, or an install when the person
+    // chose `updates: auto` (a copy read from a folder is left to git)
+    void (async () => {
+      if (settings.updates === 'off') return
+      const current = await pluginVersion($)
+      const latest = await latestRelease($)
+      if (!latest || !current || !isNewer(latest.version, current)) return
+      if (settings.updates === 'auto' && !isFolderInstall($.plugin.root)) {
+        const r = await install($)
+        $.ui.toast(r.ok ? `Locum updated itself to ${latest.version}. Run /reload-plugins to load it.` : `Locum ${latest.version} is out, but installing it failed. /locum update says more.`)
+        return
+      }
+      if (await firstNotice($, latest.version)) $.ui.toast(`Locum ${latest.version} is out (you have ${current}). /locum update shows what changed and installs it.`)
     })().catch(() => {})
 
     return started
@@ -246,20 +283,40 @@ export const register: Register = (on, options) => {
       return { skip: `the OpenRouter session cap of ${usd(settings.maxSessionUsd)} is reached, so ${model} won't compact this conversation (raise maxSessionUsd in /plugin configure)` }
     }
     const key = await openRouterKey($, settings.keys)
-    if (!key) return { skip: `compacting needs an OpenRouter key; ${NO_KEY}` }
+    const route = routeFor(model)
+    if (!key && !route) return { skip: `compacting needs an OpenRouter key; ${NO_KEY}` }
     const agent = e.agentId !== undefined ? (agents[(await getRun($, e.agentId))?.name ?? ''] ?? loopAgent(model, false)) : loopAgent(model, false)
     const transcript = e.messages
       .map(m => `${m.role.toUpperCase()}: ${m.text}${m.toolUses.length ? `\n[tools: ${m.toolUses.map(t => `${t.tool}${t.isError ? ' (error)' : ''}`).join(', ')}]` : ''}`)
       .join('\n\n')
       .slice(-400000)
     const body = requestBody(agent, [{ role: 'user', content: [{ type: 'text', text: `${e.instructions ? `${e.instructions}\n\n` : ''}${transcript}` }] }], [], THINKING_BUDGET.low!, COMPACT_PROMPT)
-    const outcome = await completeText($, key, body, new AbortController().signal)
-    const cost = costOf(model, outcome, JSON.stringify(body).length)
+    // The cheaper route first, the other if it fails, as for a step
+    const now = await $.clock.now()
+    const ways = !route ? ['openrouter'] : choiceFor(agent, route, now, !!key).directFirst ? ['lab', 'openrouter'] : ['openrouter', 'lab']
+    let outcome: StepOutcome | undefined
+    let cost = 0
+    let servedBy = 'OpenRouter'
+    for (const way of ways) {
+      if (way === 'openrouter' && !key) continue
+      if (way === 'lab') {
+        const labBody = forLab(body, route!)
+        outcome = await completeText($, directKeys[route!.provider.keyEnv]!, labBody, new AbortController().signal, { url: route!.url, auth: route!.provider.auth })
+        cost += costOf(model, outcome, JSON.stringify(labBody).length, priceNow(route!, new Date(now)))
+        servedBy = `${route!.provider.label} direct`
+      } else {
+        outcome = await completeText($, key!, body, new AbortController().signal)
+        cost += costOf(model, outcome, JSON.stringify(body).length)
+        servedBy = 'OpenRouter'
+      }
+      if (!outcome.failure && outcome.answer.trim()) break
+    }
+    if (!outcome) return { skip: `compacting needs an OpenRouter key; ${NO_KEY}` }
     // Compaction counts toward the caps like any step
     if (!(await getRun($, runKey))) await putRun($, runKey, newRun(e.agentId !== undefined ? 'subagent' : 'main', model, false, await $.clock.now()))
     await patchRun($, runKey, r => ({ ...r, usd: r.usd + cost }))
     await addSpend($, e.agentId !== undefined ? 'subagent' : 'main', cost).catch(() => {})
-    if (outcome.failure || !outcome.answer.trim()) return { skip: `compacting on ${model} via OpenRouter failed: ${outcome.failure?.message ?? 'empty summary'}` }
+    if (outcome.failure || !outcome.answer.trim()) return { skip: `compacting on ${model} via ${servedBy} failed: ${outcome.failure?.message ?? 'empty summary'}` }
     const summary = `This session is being continued from an earlier conversation that was compacted. Summary of it:\n\n${outcome.answer.trim()}`
     return { messages: [{ role: 'user' as const, text: summary, toolUses: [] }] }
   }).catch(($, e, next) => next(e))
@@ -501,12 +558,8 @@ export const register: Register = (on, options) => {
     let requestChars = 0
     const request = (a: AgentDef, route?: Route) => {
       const adapted = adaptMessages(messages, a, isSubagent && isAuto)
-      const body: Record<string, unknown> = requestBody(a, nudge ? withNudge(adapted) : adapted, tools, budget, systemText)
-      if (route) {
-        // The lab's own model ID, and no OpenRouter-only provider preferences
-        body.model = route.model
-        delete body.provider
-      }
+      const openRouterBody: Record<string, unknown> = requestBody(a, nudge ? withNudge(adapted) : adapted, tools, budget, systemText)
+      const body = route ? forLab(openRouterBody, route) : openRouterBody
       requestChars = JSON.stringify(body).length
       return streamStep($, {
         key: route ? directKeys[route.provider.keyEnv]! : key!,
@@ -541,43 +594,55 @@ export const register: Register = (on, options) => {
       }
       return result
     }
-    // One model's attempt: its direct route first when there is one, then OpenRouter.
-    // A direct failure (an outage, a wrong model ID, an empty balance there) goes
-    // on to OpenRouter; one that already showed output, or an interruption, stops.
+    // One model's attempt over its routes, the cheaper first (pricing.ts): the
+    // lab's own API and OpenRouter. A failure before any output (an outage, a
+    // refused key, no provider meeting the privacy setting) moves to the other
+    // route; output already shown, an interruption or a full context stops there.
     let directUsed: Route | undefined
+    const viaLab = async function* (a: AgentDef, route: Route) {
+      let direct!: StepOutcome
+      for (const url of route.urls) {
+        direct = yield* timed(a, { ...route, url })
+        stepCost += costOf(a.model, direct, requestChars, priceNow(route, new Date(await $.clock.now())))
+        if (!direct.failure) workingUrl[route.provider.id] = url
+        // A key refused at one region's endpoint may be another region's
+        const refused = direct.failure?.status === 401 || direct.failure?.status === 403
+        if (!refused || direct.yielded) break
+      }
+      const f = direct.failure
+      if ((f?.status === 401 || f?.status === 403) && !direct.yielded && !refusedKey.has(route.provider.id)) {
+        refusedKey.add(route.provider.id)
+        $.ui.toast(`${route.provider.label} refused its API key, so Locum uses OpenRouter for its models this session. Fix the key in ${CONFIGURE}.`)
+      }
+      if (!f) directUsed = route
+      return direct
+    }
+    const viaOpenRouter = async function* (a: AgentDef) {
+      const outcome: StepOutcome = yield* timed(a)
+      stepCost += costOf(a.model, outcome, requestChars)
+      return outcome
+    }
     const attempt = async function* (a: AgentDef) {
       const route = routeFor(a.model)
-      if (route && (healthOf(`${a.model} via ${route.provider.label}`).skipUntil ?? 0) <= (await $.clock.now())) {
-        let direct!: StepOutcome
-        for (const url of route.urls) {
-          direct = yield* timed(a, { ...route, url })
-          stepCost += costOf(a.model, direct, requestChars, priceNow(route, new Date(await $.clock.now())))
-          if (!direct.failure) workingUrl[route.provider.id] = url
-          // A key refused at one region's endpoint may be another region's
-          const refused = direct.failure?.status === 401 || direct.failure?.status === 403
-          if (!refused || direct.yielded) break
-        }
-        const f = direct.failure
-        if ((f?.status === 401 || f?.status === 403) && !direct.yielded && !refusedKey.has(route.provider.id)) {
-          refusedKey.add(route.provider.id)
-          $.ui.toast(`${route.provider.label} refused its API key, so Locum uses OpenRouter for its models this session. Fix the key in ${CONFIGURE}.`)
-        }
-        if (!f || direct.yielded || f.kind === 'interrupted' || f.kind === 'context' || !key) {
-          if (!f) directUsed = route
-          return direct
-        }
-        $.ui.log(`${owner}: ${route.provider.label} direct failed (${f.message.slice(0, 80)}); trying OpenRouter`)
+      const now = await $.clock.now()
+      const labUsable = !!route && (healthOf(`${a.model} via ${route.provider.label}`).skipUntil ?? 0) <= now
+      const order = !route ? ['openrouter'] : choiceFor(a, route, now, !!key).directFirst ? ['lab', 'openrouter'] : ['openrouter', 'lab']
+      let last: StepOutcome | undefined
+      for (const way of order) {
+        if ((way === 'lab' && !labUsable) || (way === 'openrouter' && !key)) continue
+        if (last) $.ui.log(`${owner}: ${a.model} failed (${last.failure!.message.slice(0, 80)}); trying ${way === 'lab' ? `${route!.provider.label} direct` : 'OpenRouter'}`)
+        const outcome: StepOutcome = way === 'lab' ? yield* viaLab(a, route!) : yield* viaOpenRouter(a)
+        const f = outcome.failure
+        if (!f || outcome.yielded || f.kind === 'interrupted' || f.kind === 'context') return outcome
+        last = outcome
       }
-      if (!key) {
-        return {
+      return (
+        last ?? {
           yielded: false, answer: '', stopReason: null, toolUses: [], model: a.model, cost: 0,
           usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
           failure: { kind: 'other', message: `${NO_KEY}, or a key for the lab that serves ${a.model}` },
         } satisfies StepOutcome
-      }
-      const viaOpenRouter: StepOutcome = yield* timed(a)
-      stepCost += costOf(a.model, viaOpenRouter, requestChars)
-      return viaOpenRouter
+      )
     }
 
     try {
@@ -693,17 +758,25 @@ export const register: Register = (on, options) => {
   // /locum: what the plugin is set to and what it has spent, plus subcommands
   on('command.run', { command: 'locum' }, async ($, e) => {
     const runs = Object.entries(await allRuns($)).sort(([, a], [, b]) => b.startedAt - a.startedAt)
-    const version = await $.fs
-      .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
-      .then(t => String((JSON.parse(String(t)) as { version?: unknown }).version ?? ''))
-      .catch(() => '')
+    const version = await pluginVersion($)
+    const [sub, arg] = (e.args ?? '').trim().split(/\s+/)
+    if (sub === 'update') return { text: await updateCommand($, arg ?? '', e.origin?.kind ?? '', version) }
     const routes: Record<string, string> = {}
+    const now = await $.clock.now()
+    const hasKey = !!(await openRouterKey($, settings.keys))
+    const perM = (v: number | undefined) => (v === undefined ? 'price unknown' : `$${v.toFixed(3)}`)
     for (const [name, a] of Object.entries(settings.agents)) {
       const route = routeFor(a.model)
-      if (route) routes[name] = `direct via ${route.provider.label} (${route.model}), then OpenRouter`
+      if (!route) continue
+      const c = choiceFor(a, route, now, hasKey)
+      const lab = `${route.provider.label} direct ${perM(c.directPerM)}`
+      const viaOr = `OpenRouter${c.openRouterProvider ? ` (${c.openRouterProvider})` : ''} ${perM(c.openRouterPerM)}`
+      routes[name] = `${c.directFirst ? `${lab}, then ${viaOr}` : `${viaOr}, then ${lab}`} (${c.why})`
     }
+    const latest = settings.updates === 'off' ? undefined : await latestRelease($).catch(() => undefined)
+    const updateLine = latest && version && isNewer(latest.version, version) ? `Update: Locum ${latest.version} is out (you have ${version}). /locum update shows what changed and installs it.` : ''
     const labKeys = Object.fromEntries(Object.values(PROVIDERS).map(p => [p.id, !!directKeys[p.keyEnv]]))
-    return { text: await runCommand($, e.args ?? '', settings, runs, version, mainModel, health, routes, labKeys) }
+    return { text: await runCommand($, e.args ?? '', settings, runs, version, mainModel, health, routes, labKeys, updateLine) }
   })
 
   // Opening one of our agents' transcripts shows the session's model in the

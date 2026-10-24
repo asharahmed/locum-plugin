@@ -27,14 +27,22 @@ export async function readLedger($: EngineInterface): Promise<Ledger> {
   return v && typeof v === 'object' ? (v as Ledger) : {}
 }
 
+// Ledger writes one after another, so agents finishing steps together don't
+// overwrite each other's read-modify-write
+let ledgerWrites: Promise<void> = Promise.resolve()
+
 // Adds one step's cost to today's line for the agent
 export async function addSpend($: EngineInterface, agent: string, amount: number) {
   if (!(amount > 0)) return
-  const ledger = await readLedger($)
-  const day = dayOf(await $.clock.now())
-  const today = { ...(ledger[day] ?? {}) }
-  today[agent] = (today[agent] ?? 0) + amount
-  await $.store.set(LEDGER, { ...ledger, [day]: today })
+  const write = ledgerWrites.then(async () => {
+    const ledger = await readLedger($)
+    const day = dayOf(await $.clock.now())
+    const today = { ...(ledger[day] ?? {}) }
+    today[agent] = (today[agent] ?? 0) + amount
+    await $.store.set(LEDGER, { ...ledger, [day]: today })
+  })
+  ledgerWrites = write.catch(() => {})
+  return write
 }
 
 // Agent -> model chosen with `/openrouter use`, kept across sessions

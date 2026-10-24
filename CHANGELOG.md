@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.5
+
+Fixes from a security review of the plugin:
+
+- High: after `/model` back to a Claude model, the plugin still treated the main session as on OpenRouter, so in auto mode with `autoMode: allow` it turned the Claude session's asks into allows, and `/compact` could send its transcript to OpenRouter. Every main step now records its model, and compaction asks Claude Code for the current one.
+- High: in auto mode with `allow`, any ask became an allow, including `permissions.ask` rules, hooks' and other plugins' asks, settings checks and admin ceilings. Only the mode's own asks are allowed now.
+- Medium: an auto-mode report could forge task-notification markup outside its "not reviewed" label; its `<` is escaped now. Reports are only delivered into real task notifications (`origin.kind`), not pasted or peer-sent look-alikes.
+- Medium: steps whose cost OpenRouter didn't report (a cut-off stream, an interruption, a provider that leaves it out) counted as $0 toward the caps. Missing costs are estimated from tokens at OpenRouter's listed prices, and compaction counts toward the caps and checks the session cap first.
+- Low: the path guard matches whole paths (a refused `.env` no longer blocks `.env.example`), records only real refusals (not EACCES file errors), and is documented as best-effort.
+- Low: agent names are looked up without inherited properties (`constructor`, `__proto__`); spend-ledger writes are serialised.
+- Documented: the permission mode is read from hook events, so a Shift+Tab mid-turn is seen one tool call late.
+- Tests for each fix (39 in all); undoing the stale-model, ask-rule or escaping fix makes its test fail.
+
 ## 0.9.4
 
 - `scripts/check.sh`: validation, a type-check against the installed Claude Code's plugin API, and the tests in one command, exiting non-zero on any failure (checked against a planted type error).

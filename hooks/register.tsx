@@ -47,7 +47,20 @@ export const register: Register = (on, options) => {
   // `${turnId}:${step}` -> highest content block index yielded, for the error handler
   const lastBlock = new Map<string, number>()
   // What each OpenRouter model can do, from the model list at session start
-  const modelInfo = new Map<string, { vision: boolean; tools: boolean; reasoning: boolean }>()
+  const modelInfo = new Map<string, { vision: boolean; tools: boolean; reasoning: boolean; price?: { input: number; output: number; cacheRead: number } }>()
+
+  // A step's cost: what OpenRouter reported, else an estimate from its tokens (or,
+  // for a reply cut off before its usage, the request's size) at the listed prices,
+  // so a provider that leaves cost out can't slip past the caps
+  const costOf = (model: string, outcome: StepOutcome, requestChars: number) => {
+    if (outcome.cost > 0) return outcome.cost
+    const price = modelInfo.get(model)?.price
+    if (!price) return 0
+    const u = outcome.usage
+    const input = u.input_tokens || (outcome.yielded || outcome.failure?.kind === 'interrupted' ? Math.ceil(requestChars / 4) : 0)
+    const output = u.output_tokens || Math.ceil(outcome.answer.length / 4)
+    return input * price.input + u.cache_read_input_tokens * price.cacheRead + output * price.output
+  }
   // The permission mode of each loop ('' for the main session), from the classic
   // hook events that carry it
   const modeOfLoop = new Map<string, string>()
@@ -108,7 +121,14 @@ export const register: Register = (on, options) => {
       const models = await $.http.fetch('https://openrouter.ai/api/v1/models', { headers: { authorization: `Bearer ${key}` } })
       if (models.ok) {
         const listed = new Map(
-          (JSON.parse(models.text).data as { id: string; architecture?: { input_modalities?: string[] }; supported_parameters?: string[] }[]).map(m => [m.id, m]),
+          (
+            JSON.parse(models.text).data as {
+              id: string
+              architecture?: { input_modalities?: string[] }
+              supported_parameters?: string[]
+              pricing?: { prompt?: string; completion?: string; input_cache_read?: string }
+            }[]
+          ).map(m => [m.id, m]),
         )
         for (const [id, m] of listed) {
           const params = m.supported_parameters ?? []
@@ -116,6 +136,15 @@ export const register: Register = (on, options) => {
             vision: (m.architecture?.input_modalities ?? []).includes('image'),
             tools: params.includes('tools'),
             reasoning: params.includes('reasoning') || params.includes('include_reasoning'),
+            ...(m.pricing
+              ? {
+                  price: {
+                    input: Number(m.pricing.prompt ?? 0),
+                    output: Number(m.pricing.completion ?? 0),
+                    cacheRead: Number(m.pricing.input_cache_read ?? m.pricing.prompt ?? 0),
+                  },
+                }
+              : {}),
           })
         }
         const missing: string[] = []
@@ -169,8 +198,15 @@ export const register: Register = (on, options) => {
   // Anthropic for that model), so the same model writes the summary
   on('session.compact', async ($, e, next) => {
     // The session's model as Claude Code has it: a resumed session compacts before any step has named it
-    const model = e.agentId !== undefined ? (await getRun($, e.agentId))?.model : mainModel || (await $.session.model())
+    // The session's model as Claude Code has it now (a resumed session compacts
+    // before any step has named it; a stale record would send a Claude session's
+    // transcript to OpenRouter)
+    const model = e.agentId !== undefined ? (await getRun($, e.agentId))?.model : await $.session.model().catch(() => mainModel)
     if (!isOpenRouterModel(model) || e.trigger === 'precompute') return next(e)
+    const runKey = e.agentId ?? MAIN_RUN
+    if (settings.maxSessionUsd > 0 && (await sessionUsd($)) >= settings.maxSessionUsd) {
+      return { skip: `the OpenRouter session cap of ${usd(settings.maxSessionUsd)} is reached, so ${model} won't compact this conversation (raise maxSessionUsd in /plugin configure)` }
+    }
     const key = await $.env.get('OPENROUTER_API_KEY')
     if (!key) return { skip: 'OPENROUTER_API_KEY is not set, so the OpenRouter conversation can\'t be compacted' }
     const agent = e.agentId !== undefined ? (agents[(await getRun($, e.agentId))?.name ?? ''] ?? loopAgent(model, false)) : loopAgent(model, false)
@@ -178,14 +214,14 @@ export const register: Register = (on, options) => {
       .map(m => `${m.role.toUpperCase()}: ${m.text}${m.toolUses.length ? `\n[tools: ${m.toolUses.map(t => `${t.tool}${t.isError ? ' (error)' : ''}`).join(', ')}]` : ''}`)
       .join('\n\n')
       .slice(-400000)
-    const outcome = await completeText(
-      $,
-      key,
-      requestBody(agent, [{ role: 'user', content: [{ type: 'text', text: `${e.instructions ? `${e.instructions}\n\n` : ''}${transcript}` }] }], [], THINKING_BUDGET.low!, COMPACT_PROMPT),
-      new AbortController().signal,
-    )
+    const body = requestBody(agent, [{ role: 'user', content: [{ type: 'text', text: `${e.instructions ? `${e.instructions}\n\n` : ''}${transcript}` }] }], [], THINKING_BUDGET.low!, COMPACT_PROMPT)
+    const outcome = await completeText($, key, body, new AbortController().signal)
+    const cost = costOf(model, outcome, JSON.stringify(body).length)
+    // Compaction counts toward the caps like any step
+    if (!(await getRun($, runKey))) await putRun($, runKey, newRun(e.agentId !== undefined ? 'subagent' : 'main', model, false, await $.clock.now()))
+    await patchRun($, runKey, r => ({ ...r, usd: r.usd + cost }))
+    await addSpend($, e.agentId !== undefined ? 'subagent' : 'main', cost).catch(() => {})
     if (outcome.failure || !outcome.answer.trim()) return { skip: `compacting on ${model} via OpenRouter failed: ${outcome.failure?.message ?? 'empty summary'}` }
-    await addSpend($, e.agentId !== undefined ? 'subagent' : 'main', outcome.cost).catch(() => {})
     const summary = `This session is being continued from an earlier conversation that was compacted. Summary of it:\n\n${outcome.answer.trim()}`
     return { messages: [{ role: 'user' as const, text: summary, toolUses: [] }] }
   }).catch(($, e, next) => next(e))
@@ -252,6 +288,9 @@ export const register: Register = (on, options) => {
     const loopMode = modeOfLoop.get(e.agentId ?? '')
     const isAuto = loopMode !== undefined ? loopMode === 'auto' : run?.isAuto
     if (!run || !isAuto || settings.autoMode !== 'allow' || verdict.decision !== 'ask') return verdict
+    // Only the ask the mode itself raised (what the classifier would review): an
+    // ask rule, a hook's, another plugin's, a setting's or an admin ceiling stands
+    if (verdict.rule || verdict.hook || verdict.plugin || verdict.setting || e.ceiling === 'ask') return verdict
     return { decision: 'allow' as const, reason: `${$.plugin.name}: auto mode can't review OpenRouter models; allowed unreviewed (autoMode: allow)` }
   }).catch(($, e, next) => (next.called ? next(e) : { decision: 'deny' as const, reason: 'openrouter-agents: permission check failed' }))
 
@@ -260,10 +299,15 @@ export const register: Register = (on, options) => {
   const reportFor = (run: AgentRun) => {
     const label = agents[run.name]?.label ?? run.model
     const fellBack = run.fallbackSteps ? ` ${run.fallbackSteps} step(s) ran on the fallback model.` : ''
-    return `[Report from ${label} via OpenRouter, delivered by the openrouter-agents plugin. Auto mode did not review this report or the work behind it. ${toolSummary(run.toolNames)}${fellBack}]\n\n${run.report}`
+    // Unreviewed model output: its "<" is escaped, so it can't close the notice
+    // around it or forge another one outside the label
+    const report = (run.report ?? '').replace(/</g, '&lt;')
+    return `[Report from ${label} via OpenRouter, delivered by the openrouter-agents plugin. Auto mode did not review this report or the work behind it. ${toolSummary(run.toolNames)}${fellBack}]\n\n${report}`
   }
 
   on('prompt.submit', async ($, e, next) => {
+    // Only a background task's own notice, not a pasted or peer-sent look-alike
+    if (e.origin?.kind !== 'task-notification') return next(e)
     const id = /<task-id>([^<]+)<\/task-id>/.exec(e.text)?.[1]
     if (!id || !e.text.includes('<result>')) return next(e)
     const run = await getRun($, id)
@@ -303,6 +347,9 @@ export const register: Register = (on, options) => {
 
   on('turn.step', async function* ($, e, next) {
     const isSubagent = e.agentId !== undefined
+    // Every main step records its model, so /model back to Claude ends OpenRouter
+    // handling (permissions, compaction) at once
+    if (!isSubagent) mainModel = e.model
     if (!isSubagent && !isOpenRouterModel(e.model)) return yield* next(e)
     const runKey = e.agentId ?? MAIN_RUN
     let run = isSubagent ? await runOf($, agents, runKey) : undefined
@@ -317,7 +364,6 @@ export const register: Register = (on, options) => {
         ? { ...existing, model: e.model, ...(isSubagent ? {} : { isAuto: isAutoNow }) }
         : newRun(isSubagent ? 'subagent' : 'main', e.model, isAutoNow, await $.clock.now())
       await putRun($, runKey, run)
-      if (!isSubagent) mainModel = e.model
     }
     if (!run) return yield* next(e)
     const agent = isLoop ? loopAgent(e.model, modelInfo.get(e.model)?.vision ?? false) : agents[run.name]
@@ -413,11 +459,14 @@ export const register: Register = (on, options) => {
     const budget = typeof effort === 'number' ? effort : (THINKING_BUDGET[effort ?? 'medium'] ?? THINKING_BUDGET.medium!)
     // The main session keeps Claude Code's own system prompt; a subagent the agent definition's
     const systemText = isSubagent ? SUBAGENT_PROMPT + (isAuto ? AUTO_REPORT_RULE : '') : (composed.get(e.model) ?? MAIN_PROMPT_FALLBACK)
+    let requestChars = 0
     const request = (a: AgentDef) => {
       const adapted = adaptMessages(messages, a, isSubagent && isAuto)
+      const body = requestBody(a, nudge ? withNudge(adapted) : adapted, tools, budget, systemText)
+      requestChars = JSON.stringify(body).length
       return streamStep($, {
         key,
-        body: requestBody(a, nudge ? withNudge(adapted) : adapted, tools, budget, systemText),
+        body,
         isAuto: isSubagent && isAuto,
         signal: next.signal,
         onBlock: index => lastBlock.set(stepKey, Math.max(lastBlock.get(stepKey) ?? -1, index)),
@@ -431,7 +480,7 @@ export const register: Register = (on, options) => {
     const providers = new Set(run.providers)
     try {
       outcome = yield* request(agent)
-      stepCost += outcome.cost
+      stepCost += costOf(agent.model, outcome, requestChars)
       if (outcome.provider) providers.add(outcome.provider)
       // A step its own model can't answer moves to the fallback model, once
       const first = outcome.failure
@@ -440,7 +489,7 @@ export const register: Register = (on, options) => {
         const fallback = fallbackFor(agent)
         showStatus(`${agent.model} failing; trying ${fallback.model}`)
         const second = yield* request(fallback)
-        stepCost += second.cost
+        stepCost += costOf(fallback.model, second, requestChars)
         if (second.provider) providers.add(second.provider)
         if (!second.failure) {
           usedFallback = true

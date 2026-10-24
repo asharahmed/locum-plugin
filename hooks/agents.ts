@@ -97,7 +97,8 @@ export function readSettings(options: Readonly<Record<string, unknown>>): Settin
     const v = Number(options[key] ?? fallback)
     return Number.isFinite(v) && v >= 0 ? v : fallback
   }
-  const agents: Record<string, AgentDef> = {}
+  // No prototype, so a name like `constructor` or `__proto__` is just a missing agent
+  const agents: Record<string, AgentDef> = Object.create(null)
   for (const [name, def] of Object.entries(DEFAULT_AGENTS)) {
     const model = opt(`${name}Model`) || def.model
     agents[name] = {

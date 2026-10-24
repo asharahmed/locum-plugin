@@ -68,7 +68,7 @@ The spend history and `use` choices live in the plugin's own store (`$.store`), 
 | Option | Default | What it does |
 |---|---|---|
 | `privacy` | `zero-retention` | Which OpenRouter providers may serve these agents: `zero-retention` (providers that keep no prompts), `no-data-collection` (none that store or train on prompts) or `off`. The subagents send your files and command output to the provider. |
-| `maxRunUsd` | 0.5 | A run that has spent this much stops before its next step, with a report saying so. 0: no cap. |
+| `maxRunUsd` | 0.5 | A run that has spent this much stops before its next step, with a report saying so. 0: no cap. When OpenRouter reports no cost for a reply, it's estimated from the tokens at the listed prices. |
 | `maxSessionUsd` | 3 | Once the session's OpenRouter subagents have spent this much, new ones are refused and running ones stop. 0: no cap. |
 | `fallbackModel` | `deepseek/deepseek-v4-flash-0731` | When a step's model keeps failing (outage, rate limit, provider error), the step is retried once on this model. Never a Claude model. |
 | `autoMode` | `refuse` | Whether these agents run in auto mode (see below). |
@@ -82,11 +82,11 @@ With the default models, each agent is pinned to its cheapest zero-retention pro
 
 Auto mode's safety check runs server-side on Anthropic's responses, so it refuses every tool call an OpenRouter subagent makes, and a permission prompt doesn't get past it. With `autoMode: refuse` the plugin won't start these agents in auto mode.
 
-With `autoMode: allow`, what the check would have reviewed is allowed unreviewed (deny rules still apply). SubagentHandback accepts only the check's approval, so the agent ends with a plain-text report that the plugin delivers in the completion notice, labelled "Auto mode did not review this report or the work behind it" and listing the tool calls the agent actually made. An agent that reports without any tool calls is nudged once to do the work. SendMessage is refused, so the labelled report is the only way results reach the main session.
+With `autoMode: allow`, what the check would have reviewed is allowed unreviewed. Only the asks auto mode itself raises are allowed: your `permissions.ask` rules, other hooks' and plugins' asks, settings checks and admin limits still ask, and deny rules still deny. The permission mode is read from Claude Code's hook events, so after Shift+Tab mid-turn the next tool call can still see the old mode. SubagentHandback accepts only the check's approval, so the agent ends with a plain-text report that the plugin delivers in the completion notice, labelled "Auto mode did not review this report or the work behind it" and listing the tool calls the agent actually made; the report's `<` characters are escaped, so it can't forge notice markup around that label. An agent that reports without any tool calls is nudged once to do the work. SendMessage is refused, so the labelled report is the only way results reach the main session.
 
 ## Guards
 
-- A path refused to Write, Edit, NotebookEdit or Read is refused to Bash too, however the command spells it (relative, `~/…`, after a `cd`).
+- A path refused to Write, Edit, NotebookEdit or Read (a real refusal, not a file error) is refused to Bash commands that name it: absolute, relative, `~/…` or after a `cd`, matched as a whole path. It's best-effort: a command that builds the path (a variable, a glob, a script) isn't caught, and it doesn't apply to the main session.
 - The system prompt tells the model not to work around a refusal or a tool it can't use.
 - If the plugin's step hook fails, the step ends with an error instead of being finished on the session's own model.
 - Per-run state (auto mode, the report, tool calls, refused paths, cost) lives in Claude Code's session state, so `/reload-plugins` mid-run keeps it.

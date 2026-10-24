@@ -1,8 +1,10 @@
-// The workaround guard: a path refused to a file tool stays off limits through
-// Bash, however the command spells it.
+// The workaround guard, best-effort: a path refused to a file tool stays off
+// limits to Bash commands that name it (absolute, relative, ~/…, after a cd).
+// A command that builds the path (variables, globs, a script) isn't caught.
 
-// A refused file tool call (permission, not a tool error like a missing file)
-export const REFUSAL = /permission|haven't granted|denied|not allowed|rejected|classifier/i
+// A refused file tool call: Claude Code's own refusals and other hooks', not a
+// file error such as EACCES "permission denied" or a missing file
+export const REFUSAL = /haven't granted|requested permissions|denied by|not allowed by|was rejected|doesn't want to proceed|classifier/i
 export const FILE_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_path', Read: 'file_path', NotebookEdit: 'notebook_path' }
 
 // An absolute, normalized path: `~` is home, a relative path is taken from `base`
@@ -31,5 +33,6 @@ export function pathsInCommand(command: string, cwd: string, home: string) {
 export function refusedPathIn(command: string, deniedPaths: readonly string[], cwd: string, home: string) {
   if (!deniedPaths.length) return undefined
   const named = pathsInCommand(command, cwd, home)
-  return deniedPaths.find(path => named.has(path) || command.includes(path))
+  // A literal mention counts only as the whole path (so a refused .env doesn't block .env.example)
+  return deniedPaths.find(path => named.has(path) || new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`).test(command))
 }

@@ -11,7 +11,7 @@ test('in auto mode the report reaches the completion notice, labelled', { option
   })
   await $.agent.spawn({ prompt: 'check files', subagentType: 'openrouter-agents:cheap', permissionMode: 'auto' } as never)
   await step($)
-  await $.prompt.submit({ text: `<task-notification><task-id>${AGENT_ID}</task-id><result>The subagent ended without delivering a report.</result></task-notification>` } as never)
+  await $.prompt.submit({ text: `<task-notification><task-id>${AGENT_ID}</task-id><result>The subagent ended without delivering a report.</result></task-notification>`, origin: { kind: 'task-notification' } } as never)
   expect(delivered).toMatch(/Auto mode did not review this report/)
   expect(delivered).toMatch(/All done: 3 files checked\./)
   expect(delivered).toMatch(/Tool calls this run: none\./)

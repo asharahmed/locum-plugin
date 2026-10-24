@@ -79,10 +79,11 @@ test('the main session in auto mode is refused unless autoMode allows it', async
 })
 
 test('a conversation on an OpenRouter model is compacted by the same model', async ($, on) => {
-  const requests = engine(on, [
-    sse([start(), ...text(0, 'hi'), ...end('end_turn')]),
-    sse([start(), ...text(0, 'The user is building a parser; tests pass.'), ...end('end_turn')]),
-  ])
+  const requests = engine(
+    on,
+    [sse([start(), ...text(0, 'hi'), ...end('end_turn')]), sse([start(), ...text(0, 'The user is building a parser; tests pass.'), ...end('end_turn')])],
+    undefined, undefined, undefined, undefined, LUNA,
+  )
   await mainStep($)
   const compacted: any = await $.session.compact({
     trigger: 'manual',

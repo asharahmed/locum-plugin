@@ -46,7 +46,8 @@ else
 fi
 
 echo "== tests"
-out=$(claude plugin test . 2>&1)
+# `|| true`: under set -e a failing run would exit here, before its failures print
+out=$(claude plugin test . 2>&1) || true
 echo "$out" | grep -E '^\(fail\)| pass$| fail$'
 echo "$out" | grep -qE '^ 0 fail$' || { echo "$out" | sed -n '/(fail)/,/^(pass/p' | head -40; exit 1; }
 echo "all checks passed"

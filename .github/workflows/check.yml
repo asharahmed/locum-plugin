@@ -1,0 +1,19 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The Claude Code build the plugin is tested against; validate and test
+      # need no login and make no model calls
+      - run: npm install -g @anthropic-ai/claude-code@2.1.310
+      - run: scripts/check.sh

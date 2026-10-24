@@ -1,7 +1,9 @@
 {
   "name": "ashar-local",
+  "description": "Locum: Claude Code subagents on DeepSeek, Qwen, GLM, Kimi, MiniMax and other models",
   "owner": {
-    "name": "Ashar Ahmed"
+    "name": "Ashar Ahmed",
+    "url": "https://github.com/asharahmed"
   },
   "plugins": [
     {

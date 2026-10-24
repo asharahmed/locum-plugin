@@ -2,7 +2,23 @@
   "name": "locum",
   "version": "1.1.1",
   "description": "Native Claude Code subagents, and the main session itself, on DeepSeek, GLM, Qwen, Kimi and other models, through the labs' own APIs or OpenRouter; your Claude login stays the default",
+  "author": {
+    "name": "Ashar Ahmed",
+    "url": "https://github.com/asharahmed"
+  },
+  "homepage": "https://github.com/asharahmed/claude-locum",
+  "repository": "https://github.com/asharahmed/claude-locum",
   "license": "MIT",
+  "keywords": [
+    "subagents",
+    "openrouter",
+    "deepseek",
+    "qwen",
+    "glm",
+    "kimi",
+    "minimax",
+    "models"
+  ],
   "userConfig": {
     "openrouterApiKey": {
       "type": "string",

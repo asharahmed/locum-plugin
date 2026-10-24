@@ -1,4 +1,11 @@
+<img src=".claude-plugin/icon.png" alt="" width="96" align="right">
+
 # Locum
+
+[![check](https://github.com/asharahmed/claude-locum/actions/workflows/check.yml/badge.svg)](https://github.com/asharahmed/claude-locum/actions/workflows/check.yml)
+[![release](https://img.shields.io/github/v/release/asharahmed/claude-locum)](https://github.com/asharahmed/claude-locum/releases)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Claude Code 2.1.309+](https://img.shields.io/badge/Claude_Code-2.1.309%2B-d97757)](https://code.claude.com)
 
 Locum lets other models do Claude's job inside Claude Code. A *locum tenens* is a doctor who covers for another, working in the same practice with its patients, records and rules. Here the practice is Claude Code: the agents Locum adds use its tools, permissions, transcripts and subagent view exactly as a native subagent does. Only the model doing the work is different, reached through [OpenRouter](https://openrouter.ai) or, for DeepSeek, GLM, Qwen and MiniMax models, the lab's own API.
 
@@ -12,10 +19,10 @@ Your Claude login and model stay the default. You hand work to a Locum agent whe
 
 ## Quick start
 
-1. Install the plugin, from a clone or straight from GitHub (a private repository needs `gh` or git signed in to an account that can read it):
+1. Install the plugin from GitHub:
 
    ```
-   claude plugin marketplace add /path/to/claude-locum      # or: asharahmed/claude-locum
+   claude plugin marketplace add asharahmed/claude-locum
    claude plugin install locum@ashar-local --scope user
    ```
 
@@ -132,7 +139,7 @@ With `autoMode: allow`, actions the check would have reviewed run unreviewed. On
 ## Requirements
 
 - Claude Code with the function-hooks plugin API: built on 2.1.309, tested on 2.1.309 and 2.1.310. Locum depends on that API's `turn.step`, `prompt.compose` and `session.compact` hooks, so check it after a Claude Code update (see Development).
-- An OpenRouter key with credit. A low balance makes OpenRouter's request checks fail intermittently; keep a few dollars on it.
+- An OpenRouter key with credit, or a lab's own key for that lab's models (see Direct providers). A low OpenRouter balance makes its request checks fail intermittently; keep a few dollars on it.
 - `curl` and `python3` on the PATH.
 
 ## Troubleshooting
@@ -152,7 +159,7 @@ To confirm nothing reaches Anthropic, start Claude Code with `--debug-file /tmp/
 
 ## Upgrading
 
-- From **openrouter-agents** (1.0.0 and earlier, renamed in 1.0.1): agent types are now `locum:…`, the command is `/locum`, and options live under `locum@ashar-local`. Uninstall `openrouter-agents@ashar-local`, install `locum@ashar-local`, and move any saved options in `~/.claude/settings.json` from `pluginConfigs."openrouter-agents@ashar-local"` to `pluginConfigs."locum@ashar-local"`. The spend history is in `~/.claude/plugins/store/openrouter-agents_ashar-local-*.json`; its `ledger-v1` entry can be copied into the new `locum_ashar-local-*.json`.
+- Installed from GitHub: `claude plugin marketplace update ashar-local`, then `/reload-plugins`.
 - A marketplace added from a folder is read from that folder: `git pull`, then `/reload-plugins`.
 - After a Claude Code update, rerun `scripts/gen-schemas.py` and `scripts/check.sh`.
 - When the run state's shape changes (`runs-2` in `hooks/state.ts`), runs recorded before the update drop out of `/locum`; the spend history and `use` choices carry over.
@@ -160,7 +167,12 @@ To confirm nothing reaches Anthropic, start Claude Code with `--debug-file /tmp/
 ## Development
 
 - `hooks/register.tsx` wires the hooks. `agents.ts` holds the agents and settings, `openrouter.ts` the streaming client, `messages.ts` what the model is sent, `commands.ts` `/locum` with the spend ledger and `use` choices, `guard.ts` the path guard, `state.ts` the run state, and `schemas.ts` the generated tool schemas. `types/index.d.ts` declares the state.
-- `scripts/check.sh` validates the plugin, type-checks it against the installed Claude Code's plugin API, and runs the 49 tests, which feed recorded OpenRouter streams through the hooks with the engine stood in for, so they spend nothing. It exits non-zero on any failure.
+- `scripts/check.sh` validates the plugin, type-checks it against the installed Claude Code's plugin API, and runs the 61 tests, which feed recorded OpenRouter streams through the hooks with the engine stood in for, so they spend nothing. It exits non-zero on any failure. GitHub Actions runs it on every push and pull request (`.github/workflows/check.yml`), without the type-check, since Claude Code's type file isn't published.
 - `scripts/live-regression.sh` runs fourteen scenarios against real OpenRouter for a few cents: each agent on a small coding task, a direct route whose key is refused (it must finish through OpenRouter), auto mode with `allow` and `refuse`, the main session on OpenRouter, the run cap, the privacy setting, the path guard, `/locum`, and compaction across resumes. It reruns the files the agents wrote and checks that no step of an OpenRouter loop went to Anthropic. Run it before a release.
 - `scripts/gen-schemas.py <path to claude-code.d.ts>` regenerates the tool schemas (needs npx; the type file is written when Claude Code's plugin-authoring skill loads).
+- `assets/icon.svg` is the icon's source; `.claude-plugin/icon.png` is rendered from it at 1024 px (`rsvg-convert -w 1024 -h 1024 assets/icon.svg -o .claude-plugin/icon.png`).
 - Turn Locum off with `claude plugin disable locum@ashar-local`; remove it with `claude plugin uninstall locum@ashar-local`.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Security reports: see [SECURITY.md](SECURITY.md).

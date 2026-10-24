@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.8
+
+- README: a troubleshooting table covering every message the plugin shows (cause and fix), how to confirm with a debug log that nothing reaches Anthropic, and upgrading notes (pulling a folder marketplace, regenerating schemas after a Claude Code update, state shape changes, the `qwen` → `cheap` rename).
+
 ## 0.9.7
 
 - Tests for what the model is sent and the auto-mode report handling (49 in all): an image for a text-only model and one that reads images, ToolSearch results (a loadable built-in and an unusable MCP tool), the model-identity rewrite, SubagentHandback offered only when Claude Code offers it, an auto-mode handback call becoming the report, reminders answered locally after one no-tools nudge, a mode change seen at the next tool call, and the Agent call's effort reaching the reasoning budget.

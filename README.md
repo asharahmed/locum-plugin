@@ -98,6 +98,29 @@ With `autoMode: allow`, what the check would have reviewed is allowed unreviewed
 - The line under the logo ("Opus 5.5 · Claude Max") has no render hook, so it keeps naming the session's model. Claude Code's own cost summary doesn't count OpenRouter spend; `/openrouter` and each run's closing line do.
 - Images go to models that take them (looked up at session start); others, and the fallback model, get a note in their place. PDF blocks become a note for all.
 
+## Troubleshooting
+
+| What you see | Why | What to do |
+|---|---|---|
+| `Agent type 'openrouter-agents:…' not found` | The session loaded the plugin before that agent existed (after an update or a `/openrouter use`). | `/reload-plugins`. |
+| `OPENROUTER_API_KEY is not set in the environment claude started from` | The key isn't in the environment of the process that started Claude Code. | Export it from your shell profile and start a new session. The desktop app doesn't read a shell profile; put it in the `env` block of `~/.claude/settings.json` there. |
+| `… can't run in auto mode` | Auto mode's check can't review OpenRouter models' actions, and `autoMode` is `refuse`. | Shift+Tab to manual or accept-edits, or set `autoMode` to `allow` if you accept unreviewed actions. |
+| `the OpenRouter balance is too low` / `couldn't confirm the balance covers this request` | The balance is short, or too low for OpenRouter's check when several requests arrive together. | Top up at https://openrouter.ai/settings/credits, or run fewer OpenRouter agents at once. |
+| `no OpenRouter provider of … meets the privacy setting` | No provider of that model qualifies under `privacy`. | Pick another model (`/openrouter models`), or loosen `privacy`. |
+| `… doesn't support tool calls` / `OpenRouter doesn't know the model …` | The model can't call tools, or the ID is wrong. | `/openrouter models <name>` for a tool-capable ID. |
+| `Stopped: this run reached the … spend cap` | `maxRunUsd` or `maxSessionUsd` was reached. | Raise it in `/plugin configure` if the spend is expected. |
+| A new session starts on an OpenRouter model | Picking a model in `/model` saved it as your default. | Set `ANTHROPIC_MODEL` in `~/.claude/settings.json`'s `env` (see "Switching the main session"). |
+| The line under the logo still names Opus | It has no render hook. | Expected. The band above the prompt and the "Using …" notice name the real model. |
+
+To confirm nothing reaches Anthropic, start with `claude --debug-file /tmp/d.log` and look for `dispatching to firstParty` lines. A step a subagent sends to Anthropic is preceded by one with `cc_is_subagent=true`; there should be none for this plugin's agents.
+
+## Upgrading
+
+- A marketplace added from a folder is read from that folder: `git pull`, then `/reload-plugins`.
+- After a Claude Code update, rerun `scripts/gen-schemas.py` and `scripts/check.sh`. A changed built-in tool's parameters show up there first.
+- When the per-run state's shape changes (`runs-2` in `hooks/state.ts`), runs recorded before the update drop out of `/openrouter`; nothing else is affected. The spend history (`ledger-v1`) and `/openrouter use` choices (`model-overrides-v1`) carry over.
+- 0.6.7 renamed the `qwen` agent and its `qwenModel`/`qwenEffort` options to `cheap`; a saved `qwen` option is ignored.
+
 ## Development
 
 - `hooks/register.tsx` wires the hooks; `agents.ts` holds the agents and settings, `commands.ts` `/openrouter`, the spend ledger and `use` choices, `openrouter.ts` the streaming client, `messages.ts` what the model is sent, `guard.ts` the path guard, `state.ts` the run state, `schemas.ts` the generated tool schemas. `types/index.d.ts` declares the state.

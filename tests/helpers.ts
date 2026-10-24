@@ -32,7 +32,7 @@ export const TASK = [{ role: 'user', content: [{ type: 'text', text: 'Do the tas
 
 const BASH = [{ name: 'Bash', description: 'Run a command', mcp: false }]
 
-export function engine(on: any, replies: string[], type = 'openrouter-agents:cheap', messages: object[] = TASK, store: Record<string, unknown> = {}, tools: object[] = BASH) {
+export function engine(on: any, replies: string[], type = 'openrouter-agents:cheap', messages: object[] = TASK, store: Record<string, unknown> = {}, tools: object[] = BASH, sessionModel = 'claude-opus-5-5') {
   const clock = mock.clock(on)
   mock.store(on, store)
   mock.env(on, {
@@ -41,7 +41,7 @@ export function engine(on: any, replies: string[], type = 'openrouter-agents:che
     ANTHROPIC_MODEL: 'opus',
     ANTHROPIC_CUSTOM_MODEL_OPTION: 'deepseek/deepseek-v4.1-flash-1017',
   })
-  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.model', () => ({ value: sessionModel }))
   on('agent.list', () => ({ value: [{ id: AGENT_ID, type, description: 'test', status: 'running' }] }))
   on('session.messages', () => ({ value: messages }))
   on('tool.list', () => ({ value: tools }))

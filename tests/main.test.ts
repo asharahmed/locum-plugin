@@ -127,3 +127,11 @@ test('a model ID OpenRouter doesn\'t know gets a clear message and no fallback',
   expect(requests.length).toBe(1)
   expect(result.answer).toMatch(/doesn't know the model "typo\/model"/)
 })
+
+test('a resumed session on an OpenRouter model compacts through OpenRouter before any step', async ($, on) => {
+  const requests = engine(on, [sse([start(), ...text(0, 'Codename BLUE HERON, due Friday.'), ...end('end_turn')])], undefined, undefined, undefined, undefined, LUNA)
+  const compacted: any = await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'codename BLUE HERON, due Friday', toolUses: [] }] } as never)
+  expect(requests.length).toBe(1)
+  expect(JSON.parse(requests[0]!).model).toBe(LUNA)
+  expect(compacted.messages[0].text).toMatch(/BLUE HERON/)
+})

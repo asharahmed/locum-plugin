@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.3
+
+- Fix: compacting a resumed session on an OpenRouter model (`/compact` before any step) went to Anthropic and failed, because the plugin only knew the main model once a step had named it. It now asks Claude Code for the session's model.
+- Verified live: a session on DeepSeek V4.1 Flash was resumed, compacted by the plugin through OpenRouter (Claude Code's own compaction never ran), and resumed again with its facts intact, with no request to Anthropic.
+- A test for compacting right after a resume (32 in all).
+
 ## 0.9.2
 
 - Model capabilities from OpenRouter's list (read at session start) shape each request: a model without reasoning support gets no thinking budget, and one without tool calls fails at once with a clear message, since Claude Code needs tools.

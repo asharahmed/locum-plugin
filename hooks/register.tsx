@@ -168,7 +168,8 @@ export const register: Register = (on, options) => {
   // A loop on an OpenRouter model can't be compacted by Claude Code (it would ask
   // Anthropic for that model), so the same model writes the summary
   on('session.compact', async ($, e, next) => {
-    const model = e.agentId !== undefined ? (await getRun($, e.agentId))?.model : mainModel
+    // The session's model as Claude Code has it: a resumed session compacts before any step has named it
+    const model = e.agentId !== undefined ? (await getRun($, e.agentId))?.model : mainModel || (await $.session.model())
     if (!isOpenRouterModel(model) || e.trigger === 'precompute') return next(e)
     const key = await $.env.get('OPENROUTER_API_KEY')
     if (!key) return { skip: 'OPENROUTER_API_KEY is not set, so the OpenRouter conversation can\'t be compacted' }

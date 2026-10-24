@@ -89,6 +89,19 @@ function spendLines(ledger: Ledger, now: number) {
   ]
 }
 
+// The main session's model, the /model picker entry, and the default-model guard
+async function mainSessionLine($: EngineInterface, mainModel: string) {
+  const current = mainModel || (await $.session.model().catch(() => ''))
+  const onOpenRouter = current.includes('/') && !current.startsWith('arn:')
+  const picker = await $.env.get('ANTHROPIC_CUSTOM_MODEL_OPTION')
+  const guard = await $.env.get('ANTHROPIC_MODEL')
+  return (
+    `Main session: ${current || 'unknown'}${onOpenRouter ? ' via OpenRouter (switch back with /model opus)' : ''}.` +
+    (picker ? ` /model picker entry: ${picker}.` : '') +
+    (guard ? ` New sessions start on ${guard} (ANTHROPIC_MODEL).` : '')
+  )
+}
+
 const HELP = [
   'Usage:',
   '  /openrouter                     balance, agents, settings, this session\'s runs and spend history',
@@ -104,6 +117,7 @@ export async function runCommand(
   settings: Settings,
   runs: [string, AgentRun][],
   version: string,
+  mainModel: string,
 ): Promise<string> {
   const [sub = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
   const key = await $.env.get('OPENROUTER_API_KEY')
@@ -169,6 +183,7 @@ export async function runCommand(
     money,
     `This session: ${runs.length} run${runs.length === 1 ? '' : 's'}, ${usd(spent)} spent. Caps: ${settings.maxRunUsd > 0 ? usd(settings.maxRunUsd) : 'none'} per run, ${settings.maxSessionUsd > 0 ? usd(settings.maxSessionUsd) : 'none'} per session.`,
     `Settings: privacy ${settings.privacy}, auto mode ${settings.autoMode}, fallback model ${settings.fallbackModel}.`,
+    await mainSessionLine($, mainModel),
     '',
     'Agents:',
     ...Object.entries(settings.agents).map(

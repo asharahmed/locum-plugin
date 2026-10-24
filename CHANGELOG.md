@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1
+
+- `/openrouter` shows the main session's model (and how to switch back when it runs on OpenRouter), the `/model` picker entry, and the model new sessions start on (`ANTHROPIC_MODEL`).
+- README: the picker entry recommendation (DeepSeek V4.1 Flash 1017) and how to keep Claude as the default whatever `/model` saves.
+
 ## 0.9.0
 
 - Main-session switching: `/model <openrouter-id>` runs the main session on that OpenRouter model, answered by the plugin. It gets Claude Code's own system prompt (captured from `prompt.compose`, model line rewritten) and every built-in tool; `/model opus` goes back.

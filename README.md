@@ -21,7 +21,9 @@ Ask for them as you would any subagent ("have kimi review this", "run the cheap 
 - Auto mode follows the `autoMode` option, as for the agents: refused by default; with `allow`, tool calls that auto mode would review run unreviewed.
 - The session cap and the spend history count the main session's spend; the per-run cap doesn't apply to it.
 - Claude Code may run its built-in subagents (general-purpose, Explore) on a Claude model of its choosing in such a session. A subagent that does inherit the OpenRouter model is answered through OpenRouter with the subagent tool set.
-- One OpenRouter model can also sit in the `/model` picker through `ANTHROPIC_CUSTOM_MODEL_OPTION` (with `_NAME`, `_DESCRIPTION`, `_SUPPORTED_CAPABILITIES=effort,thinking`) in the `env` block of `~/.claude/settings.json`. The picker can't list more than one: Claude Code fills it from its own models and that one entry.
+- One OpenRouter model can also sit in the `/model` picker through `ANTHROPIC_CUSTOM_MODEL_OPTION` (with `_NAME`, `_DESCRIPTION`, `_SUPPORTED_CAPABILITIES=effort,thinking`) in the `env` block of `~/.claude/settings.json`; DeepSeek V4.1 Flash 1017 is a good one (it tied the best on a coding benchmark at $0.15/$0.60 per million tokens). The picker can't list more than one: Claude Code fills it from its own models and that one entry.
+- Picking a model in `/model` saves it as your default. To keep new sessions on Claude whatever gets picked, set `ANTHROPIC_MODEL` (to `opus`, say) in that same `env` block: it outranks the saved default at every launch, while `/model` still switches the session you're in. Pressing `s` in the picker applies a choice to the current session only.
+- `/openrouter` shows the main session's model, the picker entry and that default.
 
 ## How it works
 

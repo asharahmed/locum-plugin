@@ -520,7 +520,7 @@ export const register: Register = (on, options) => {
       .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
       .then(t => String((JSON.parse(String(t)) as { version?: unknown }).version ?? ''))
       .catch(() => '')
-    return { text: await runCommand($, e.args ?? '', settings, runs, version) }
+    return { text: await runCommand($, e.args ?? '', settings, runs, version, mainModel) }
   })
 
   // Opening one of our agents' transcripts shows the session's model in the

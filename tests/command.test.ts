@@ -19,6 +19,7 @@ test('/openrouter shows the balance, the agents and the runs', async ($, on) => 
   expect(shown).toMatch(/kimi +moonshotai\/kimi-k3 · effort low/)
   expect(shown).toMatch(/1 run, \$0\.0042 spent/)
   expect(shown).toMatch(/Relace/)
+  expect(shown).toMatch(/Main session: claude-opus-5-5\. \/model picker entry: deepseek\/deepseek-v4\.1-flash-1017\. New sessions start on opus/)
 })
 
 test('the spend history adds up across steps and shows per agent', async ($, on) => {

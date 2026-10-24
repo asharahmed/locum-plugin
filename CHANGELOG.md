@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0
+
+The first stable release. Unchanged code since 0.9.9, which passed every automated test (49) and every live scenario (12), on Claude Code 2.1.309 and again on 2.1.310.
+
+What 1.0 is:
+
+- Native Claude Code subagents on OpenRouter models (deepseek, kimi, glm, cheap and a custom slot), with the main session on your usual login and model.
+- The main session itself on any OpenRouter model through `/model <id>`, with Claude Code's own system prompt, every built-in tool, and compaction by the same model.
+- Zero-retention providers by default, pinned to the cheapest qualifying ones; per-run and per-session spend caps; a fallback model and a skip for failing models.
+- Opt-in auto mode with unreviewed actions clearly labelled; a best-effort path guard; nothing ever falling back to the session's own model.
+- `/openrouter` for balance, agents, settings, health, runs and spend history across sessions; `models` and `use` to pick models.
+- `scripts/check.sh` (validate, type-check, 49 tests) and `scripts/live-regression.sh` (12 live scenarios).
+
+From here, agent names, option names and `/openrouter` subcommands are stable.
+
 ## 0.9.9
 
 - Release candidate. `scripts/live-regression.sh`: twelve scenarios against real OpenRouter, each checked by outcome (files the agents wrote are rerun) and for steps leaking to Anthropic. All twelve passed for $0.04: the four agents, auto mode with `allow` and `refuse`, the main session on OpenRouter, the run cap, the privacy setting, the path guard, `/openrouter`, and compaction across resumes.

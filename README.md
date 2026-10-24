@@ -12,6 +12,14 @@ A Claude Code plugin that adds subagents running on OpenRouter models, while the
 
 Ask for them as you would any subagent ("have kimi review this", "run the cheap agent on that").
 
+## Requirements
+
+- Claude Code with the function-hooks plugin API (built on 2.1.309, tested on 2.1.309 and 2.1.310). The plugin leans on that API's `turn.step`, `prompt.compose` and `session.compact` hooks; a Claude Code update that changes them can break it, so run `scripts/check.sh` and `scripts/live-regression.sh` after one.
+- An OpenRouter API key with credit. A low balance makes OpenRouter's request checks fail intermittently; keep a few dollars on it.
+- `curl` and `python3` (for the schema generator and scripts) on the PATH.
+
+From 1.0.0, the agent names, option names and `/openrouter` subcommands are stable: a change to them comes with a major version and a note under "Upgrading".
+
 ## Switching the main session
 
 `/model <openrouter-id>` (for example `/model moonshotai/kimi-k3`) runs the main session itself on that OpenRouter model; `/model opus` goes back. Claude Code accepts any model ID there, and the plugin answers every request of a session whose model is an OpenRouter ID (one with a `/`). `/openrouter models` lists IDs to choose from.

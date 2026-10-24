@@ -13,7 +13,7 @@ test('/locum shows the balance, the agents and the runs', async ($, on) => {
   await step($)
   const out: any = await $.command.run({ command: 'locum', args: '' } as never)
   const shown = String(out.text ?? out.value?.text ?? '')
-  expect(shown).toMatch(/^Locum 9\.9\.9: Claude Code agents on OpenRouter models$/m)
+  expect(shown).toMatch(/^Locum 9\.9\.9: Claude Code agents on other labs' models$/m)
   expect(shown).toMatch(/\$2\.50 on the account/)
   expect(shown).toMatch(/cheap +deepseek\/deepseek-v4-flash-0731/)
   expect(shown).toMatch(/kimi +moonshotai\/kimi-k3 · effort low/)

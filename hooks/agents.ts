@@ -132,6 +132,23 @@ export function readSettings(options: Readonly<Record<string, unknown>>): Settin
   }
 }
 
+// The run key of the main session when it runs on an OpenRouter model
+export const MAIN_RUN = 'main-session'
+
+// An OpenRouter model ID: Claude Code's own model IDs have no "/" (a Bedrock ARN
+// is the only other kind that does)
+export function isOpenRouterModel(model: string | undefined): model is string {
+  return !!model && model.includes('/') && !model.startsWith('arn:')
+}
+
+// The definition for a loop that runs on an OpenRouter model it was given rather
+// than one of the plugin's agents: the main session after /model, or a subagent
+// that inherited that model. A default agent's model keeps its label and pins.
+export function loopAgent(model: string, vision: boolean): AgentDef {
+  const known = Object.values(DEFAULT_AGENTS).find(a => a.model === model)
+  return { model, label: known?.label ?? model, when: '', vision, effort: 'medium', ...(known?.providers ? { providers: known.providers } : {}) }
+}
+
 // The agent's name inside `openrouter-agents:<name>`, or '' for any other type
 export function agentName(subagentType: string | undefined, plugin: string) {
   return subagentType?.startsWith(`${plugin}:`) ? subagentType.slice(plugin.length + 1) : ''

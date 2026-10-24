@@ -5,7 +5,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 import type { AgentRun } from '../types'
 import type { AgentDef } from './agents'
-import { agentName } from './agents'
+import { MAIN_RUN, agentName } from './agents'
 
 // Every run of our agents this session, by agentId. Bump the shape tag when
 // AgentRun changes: the old value is then read as absent.
@@ -75,4 +75,11 @@ export async function runOf($: EngineInterface, agents: Record<string, AgentDef>
   const created = newRun(name, agents[name]?.model ?? '', false, await $.clock.now())
   await update($, runsAtom, runs => (runs[agentId] ? runs : { ...runs, [agentId]: created }))
   return (await getRun($, agentId)) ?? created
+}
+
+// The run behind a loop: one of our agents' runs, a subagent's on an OpenRouter
+// model of its own, or the main session's while it runs on one
+export async function loopRunOf($: EngineInterface, agents: Record<string, AgentDef>, agentId: string | undefined, mainOnOpenRouter: boolean) {
+  if (agentId !== undefined) return (await runOf($, agents, agentId)) ?? (await getRun($, agentId))
+  return mainOnOpenRouter ? getRun($, MAIN_RUN) : undefined
 }

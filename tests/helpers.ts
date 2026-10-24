@@ -30,13 +30,15 @@ export const end = (stop_reason: string, cost = 0.001) => [
 // taken from `replies`, one per request
 export const TASK = [{ role: 'user', content: [{ type: 'text', text: 'Do the task.' }] }]
 
-export function engine(on: any, replies: string[], type = 'openrouter-agents:cheap', messages: object[] = TASK, store: Record<string, unknown> = {}) {
+const BASH = [{ name: 'Bash', description: 'Run a command', mcp: false }]
+
+export function engine(on: any, replies: string[], type = 'openrouter-agents:cheap', messages: object[] = TASK, store: Record<string, unknown> = {}, tools: object[] = BASH) {
   const clock = mock.clock(on)
   mock.store(on, store)
   mock.env(on, { OPENROUTER_API_KEY: 'test-key', HOME: '/home/t' })
   on('agent.list', () => ({ value: [{ id: AGENT_ID, type, description: 'test', status: 'running' }] }))
   on('session.messages', () => ({ value: messages }))
-  on('tool.list', () => ({ value: [{ name: 'Bash', description: 'Run a command', mcp: false }] }))
+  on('tool.list', () => ({ value: tools }))
   // The display calls the plugin makes; a headless engine answers them silently
   for (const call of ['ui.status', 'ui.log', 'ui.toast', 'ui.invalidate']) on(call, () => ({ value: undefined }))
   const requests: string[] = []

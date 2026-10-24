@@ -50,6 +50,11 @@ export const NO_TOOLS_NUDGE =
   'reply with your final report again.'
 
 const MODEL_LINE = /You are powered by the model named [^\n]*/
+
+// The model-identity line rewritten to name the real model, in a system prompt or message
+export function withIdentity(text: string, agent: AgentDef) {
+  return text.replace(MODEL_LINE, `You are powered by the model named ${agent.label}. The exact model ID is ${agent.model}, reached through OpenRouter.`)
+}
 const HANDBACK_TEXT = /[^\n]*SubagentHandback[^\n]*/g
 const PLAIN_REPORT = 'When your work is complete, write your full final report as your last message, in plain text. It is delivered for you; there is no tool to call for it.'
 
@@ -118,15 +123,21 @@ function loadedTools(messages: Messages) {
   return [...names]
 }
 
-// The tools offered to the model: the session's built-ins that have a schema,
-// built-ins ToolSearch loaded, and SubagentHandback when the engine gives it
-export function toolsFor(session: readonly { name: string; description: string; mcp: boolean }[], messages: Messages, withHandback: boolean) {
+// The tools offered to the model: the session's built-ins that have a schema
+// (only `allowed` ones for a subagent), built-ins ToolSearch loaded, and
+// SubagentHandback when the engine gives it
+export function toolsFor(
+  session: readonly { name: string; description: string; mcp: boolean }[],
+  messages: Messages,
+  withHandback: boolean,
+  allowed?: readonly string[],
+) {
   const direct: ToolDef[] = session
-    .filter(t => !t.mcp && TOOL_SCHEMAS[t.name])
+    .filter(t => !t.mcp && TOOL_SCHEMAS[t.name] && (!allowed || allowed.includes(t.name)))
     .map(t => ({ name: t.name, description: t.description, input_schema: TOOL_SCHEMAS[t.name]! }))
   const offered = new Set(direct.map(t => t.name))
   const loaded: ToolDef[] = loadedTools(messages)
-    .filter(name => !offered.has(name))
+    .filter(name => !offered.has(name) && (!allowed || allowed.includes(name)))
     .map(name => ({ name, description: session.find(t => t.name === name)?.description ?? name, input_schema: TOOL_SCHEMAS[name]! }))
   return withHandback ? [...direct, ...loaded, HANDBACK_TOOL] : [...direct, ...loaded]
 }

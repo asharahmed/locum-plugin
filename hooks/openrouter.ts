@@ -259,3 +259,12 @@ export async function balanceOf($: EngineInterface, key: string) {
   const keyLeft: number | undefined = typeof k?.limit_remaining === 'number' ? k.limit_remaining : undefined
   return { account, keyLeft }
 }
+
+// One request run to the end with nothing shown: its text, or the failure
+export async function completeText($: EngineInterface, key: string, body: Record<string, unknown>, signal: AbortSignal) {
+  const stream = streamStep($, { key, body, isAuto: false, signal, onBlock: () => {}, onRetry: () => {} })
+  for (;;) {
+    const r = await stream.next()
+    if (r.done) return r.value
+  }
+}

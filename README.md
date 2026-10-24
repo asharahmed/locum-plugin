@@ -1,6 +1,6 @@
 # openrouter-agents
 
-A Claude Code plugin that adds subagents running on OpenRouter models, while the main session stays on your usual login and model (Opus on a Claude subscription, say).
+A Claude Code plugin that adds subagents running on OpenRouter models, while the main session stays on your usual login and model (Opus on a Claude subscription, say). The main session can also be switched to any OpenRouter model with `/model <id>`.
 
 | Agent | Default model | Use it for |
 |---|---|---|
@@ -11,6 +11,17 @@ A Claude Code plugin that adds subagents running on OpenRouter models, while the
 | `openrouter-agents:custom` | any OpenRouter model you set | trying a model out |
 
 Ask for them as you would any subagent ("have kimi review this", "run the cheap agent on that").
+
+## Switching the main session
+
+`/model <openrouter-id>` (for example `/model moonshotai/kimi-k3`) runs the main session itself on that OpenRouter model; `/model opus` goes back. Claude Code accepts any model ID there, and the plugin answers every request of a session whose model is an OpenRouter ID (one with a `/`). `/openrouter models` lists IDs to choose from.
+
+- The main session gets Claude Code's own system prompt, captured as Claude Code renders it, with the model-identity line naming the real model, and every built-in tool. MCP tools can't be used.
+- Compaction is done by the same model through OpenRouter (Claude Code would ask Anthropic for it).
+- Auto mode follows the `autoMode` option, as for the agents: refused by default; with `allow`, tool calls that auto mode would review run unreviewed.
+- The session cap and the spend history count the main session's spend; the per-run cap doesn't apply to it.
+- Claude Code may run its built-in subagents (general-purpose, Explore) on a Claude model of its choosing in such a session. A subagent that does inherit the OpenRouter model is answered through OpenRouter with the subagent tool set.
+- One OpenRouter model can also sit in the `/model` picker through `ANTHROPIC_CUSTOM_MODEL_OPTION` (with `_NAME`, `_DESCRIPTION`, `_SUPPORTED_CAPABILITIES=effort,thinking`) in the `env` block of `~/.claude/settings.json`. The picker can't list more than one: Claude Code fills it from its own models and that one entry.
 
 ## How it works
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0
+
+- Main-session switching: `/model <openrouter-id>` runs the main session on that OpenRouter model, answered by the plugin. It gets Claude Code's own system prompt (captured from `prompt.compose`, model line rewritten) and every built-in tool; `/model opus` goes back.
+- Any loop on an OpenRouter model is answered through OpenRouter: the main session, the plugin's agents, and subagents that inherit an OpenRouter model (those get the subagent tool set and prompt).
+- Compaction of an OpenRouter conversation is done by the same model (`session.compact`), since Claude Code would ask Anthropic for it.
+- Auto mode for the main session follows `autoMode`; the permission mode is tracked from the classic UserPromptSubmit, SubagentStart and PostToolUse events.
+- `hooks/schemas.ts` now holds every built-in tool's schema plus `SUBAGENT_TOOLS`.
+- The step error handler never lets an OpenRouter loop fall to the session's model.
+- Tests for the main session, pass-through on a Claude model, inherited subagents, the captured system prompt, main-session auto mode and compaction (28 in all).
+- Live: a session started with `--model openai/gpt-6-luna` wrote and tested a script with Read, Write and Bash on Claude Code's real 6,959-character system prompt, with no request to Anthropic.
+
 ## 0.8.0
 
 - Spend history across sessions: each step's cost is added to a per-day, per-agent ledger in the plugin's store; `/openrouter` shows today, the last 7 days and everything recorded.

@@ -1,7 +1,7 @@
 import type { Register, TurnStepResult, TurnStepToolUse, TurnStopReason, TurnUsage } from 'claude-code'
 import type { AgentRun } from '../types'
 import type { AgentDef } from './agents'
-import { agentName, fallbackModelFor, readSettings } from './agents'
+import { MAIN_RUN, agentName, fallbackModelFor, isOpenRouterModel, loopAgent, readSettings } from './agents'
 import { TOP_UP, addSpend, applyOverrides, readOverrides, runCommand, usd } from './commands'
 import { FILE_TOOLS, REFUSAL, normalizePath, refusedPathIn } from './guard'
 import {
@@ -14,15 +14,25 @@ import {
   engineOffersHandback,
   toolSummary,
   toolsFor,
+  withIdentity,
   withNudge,
 } from './messages'
 import type { StepOutcome } from './openrouter'
-import { balanceOf, streamStep } from './openrouter'
-import { allRuns, getRun, newRun, patchRun, putRun, runOf, sessionUsd } from './state'
+import { balanceOf, completeText, streamStep } from './openrouter'
+import { SUBAGENT_TOOLS } from './schemas'
+import { allRuns, getRun, loopRunOf, newRun, patchRun, putRun, runOf, sessionUsd } from './state'
 
 // Reasoning budget per effort level; the answer gets ANSWER_TOKENS beyond it
 const THINKING_BUDGET: Record<string, number> = { low: 1024, medium: 4000, high: 8000, xhigh: 12000, max: 16000 }
 const ANSWER_TOKENS = 12000
+// The main session's system prompt when none was captured from Claude Code's own
+const MAIN_PROMPT_FALLBACK =
+  'You are Claude Code, an interactive coding assistant working in the user\'s terminal. Use the tools available to do ' +
+  'what the user asks, check your work, and keep replies concise.'
+const COMPACT_PROMPT =
+  'Summarize the conversation below so the work can continue from the summary alone. Keep: the user\'s goals and ' +
+  'requests, decisions made, files and code touched (with paths), commands run and their outcomes, errors and how they ' +
+  'were resolved, and what remains to do. Write it as a plain, complete summary.'
 
 export const register: Register = (on, options) => {
   const settings = readSettings(options)
@@ -36,6 +46,16 @@ export const register: Register = (on, options) => {
   const pendingEffort = new Map<string, string>()
   // `${turnId}:${step}` -> highest content block index yielded, for the error handler
   const lastBlock = new Map<string, number>()
+  // Whether OpenRouter models take images, from the model list at session start
+  const visionOf = new Map<string, boolean>()
+  // The permission mode of each loop ('' for the main session), from the classic
+  // hook events that carry it
+  const modeOfLoop = new Map<string, string>()
+  // The main session's model as its last step named it
+  let mainModel = ''
+  // Claude Code's own system prompt for each model, as prompt.compose rendered it
+  const composed = new Map<string, string>()
+
 
   // The model a failing step moves to: never the agent's own, never a Claude model
   const fallbackFor = (agent: AgentDef): AgentDef => {
@@ -44,8 +64,7 @@ export const register: Register = (on, options) => {
   }
 
   // The OpenRouter request for one step
-  const requestBody = (agent: AgentDef, messages: unknown[], tools: unknown[], effort: string, isAuto: boolean) => {
-    const budget = THINKING_BUDGET[effort] ?? THINKING_BUDGET.medium!
+  const requestBody = (agent: AgentDef, messages: unknown[], tools: unknown[], budget: number, systemText: string) => {
     const provider = { ...(agent.providers ? { order: agent.providers, allow_fallbacks: true } : {}), ...settings.privacyPrefs }
     return {
       model: agent.model,
@@ -57,7 +76,7 @@ export const register: Register = (on, options) => {
       // native subagent; the system prompt is the agent definition's own. Tools
       // come before it in the cached prefix, so its mark covers them too. (A mark
       // on a tool itself made DeepSeek's provider drop that tool.)
-      system: [{ type: 'text', text: SUBAGENT_PROMPT + (isAuto ? AUTO_REPORT_RULE : ''), cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: withIdentity(systemText, agent), cache_control: { type: 'ephemeral' } }],
       messages,
       tools,
     }
@@ -89,6 +108,7 @@ export const register: Register = (on, options) => {
         const listed = new Map(
           (JSON.parse(models.text).data as { id: string; architecture?: { input_modalities?: string[] } }[]).map(m => [m.id, m]),
         )
+        for (const [id, m] of listed) visionOf.set(id, (m.architecture?.input_modalities ?? []).includes('image'))
         const missing: string[] = []
         for (const [name, a] of Object.entries(agents)) {
           const m = listed.get(a.model)
@@ -111,6 +131,54 @@ export const register: Register = (on, options) => {
 
   // Hooks below that only add to an event fail open (`.catch(... => next(e))`):
   // a state read that fails lets the spawn, notice or tool call go on as usual.
+
+  // The permission mode, which only the classic hook events carry: the main
+  // session's at each prompt, a subagent's as it starts, and either's after each
+  // tool call (so Shift+Tab mid-turn counts from the next call)
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    if (e.permission_mode) modeOfLoop.set('', e.permission_mode)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+  on('classic.SubagentStart', async ($, e, next) => {
+    if (e.permission_mode && e.agent_id) modeOfLoop.set(e.agent_id, e.permission_mode)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+  on('classic.PostToolUse', async ($, e, next) => {
+    if (e.permission_mode) modeOfLoop.set(e.agent_id ?? '', e.permission_mode)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // Claude Code's own system prompt for a model, kept for the main session's
+  // OpenRouter requests (the last render for that model wins)
+  on('prompt.compose', async ($, e, next) => {
+    const result = await next(e)
+    if (isOpenRouterModel(e.model)) composed.set(e.model, result.sections.map(section => section.text).join('\n\n'))
+    return result
+  }).catch(($, e, next) => next(e))
+
+  // A loop on an OpenRouter model can't be compacted by Claude Code (it would ask
+  // Anthropic for that model), so the same model writes the summary
+  on('session.compact', async ($, e, next) => {
+    const model = e.agentId !== undefined ? (await getRun($, e.agentId))?.model : mainModel
+    if (!isOpenRouterModel(model) || e.trigger === 'precompute') return next(e)
+    const key = await $.env.get('OPENROUTER_API_KEY')
+    if (!key) return { skip: 'OPENROUTER_API_KEY is not set, so the OpenRouter conversation can\'t be compacted' }
+    const agent = e.agentId !== undefined ? (agents[(await getRun($, e.agentId))?.name ?? ''] ?? loopAgent(model, false)) : loopAgent(model, false)
+    const transcript = e.messages
+      .map(m => `${m.role.toUpperCase()}: ${m.text}${m.toolUses.length ? `\n[tools: ${m.toolUses.map(t => `${t.tool}${t.isError ? ' (error)' : ''}`).join(', ')}]` : ''}`)
+      .join('\n\n')
+      .slice(-400000)
+    const outcome = await completeText(
+      $,
+      key,
+      requestBody(agent, [{ role: 'user', content: [{ type: 'text', text: `${e.instructions ? `${e.instructions}\n\n` : ''}${transcript}` }] }], [], THINKING_BUDGET.low!, COMPACT_PROMPT),
+      new AbortController().signal,
+    )
+    if (outcome.failure || !outcome.answer.trim()) return { skip: `compacting on ${model} via OpenRouter failed: ${outcome.failure?.message ?? 'empty summary'}` }
+    await addSpend($, e.agentId !== undefined ? 'subagent' : 'main', outcome.cost).catch(() => {})
+    const summary = `This session is being continued from an earlier conversation that was compacted. Summary of it:\n\n${outcome.answer.trim()}`
+    return { messages: [{ role: 'user' as const, text: summary, toolUses: [] }] }
+  }).catch(($, e, next) => next(e))
 
   // Auto mode's safety check runs server-side on Anthropic's responses. Steps
   // OpenRouter answered carry no verdict, so it refuses every tool call these
@@ -153,15 +221,16 @@ export const register: Register = (on, options) => {
   // In auto mode, what the classifier would have reviewed is allowed. Deny rules
   // and anything core decides outright still stand.
   on('tool.check', async ($, e, next) => {
-    const run = e.agentId !== undefined ? await runOf($, agents, e.agentId) : undefined
+    const run = await loopRunOf($, agents, e.agentId, isOpenRouterModel(mainModel))
+    const isSubagent = e.agentId !== undefined
     // In auto mode the labelled report is the only way results reach the main
     // session; SendMessage would carry them there unlabelled
-    if (run?.isAuto && e.tool === 'SendMessage') {
+    if (isSubagent && run?.isAuto && e.tool === 'SendMessage') {
       return { decision: 'deny' as const, reason: 'SendMessage is off for OpenRouter subagents in auto mode. Put everything in your final report.' }
     }
     // A path a file tool was refused for stays off limits through Bash too,
     // however the command spells it (relative, ~/…, after a cd)
-    if (run && e.tool === 'Bash') {
+    if (isSubagent && run && e.tool === 'Bash') {
       const command = String((e.input as { command?: unknown } | undefined)?.command ?? '')
       const hit = refusedPathIn(command, run.deniedPaths, cwd, home)
       if (hit) {
@@ -169,14 +238,17 @@ export const register: Register = (on, options) => {
       }
     }
     const verdict = await next(e)
-    if (!run?.isAuto || verdict.decision !== 'ask') return verdict
-    return { decision: 'allow' as const, reason: `${$.plugin.name}: auto mode can't review OpenRouter subagents; allowed unreviewed (autoMode: allow)` }
+    // The loop's mode as last seen, else the run's own at its start
+    const loopMode = modeOfLoop.get(e.agentId ?? '')
+    const isAuto = loopMode !== undefined ? loopMode === 'auto' : run?.isAuto
+    if (!run || !isAuto || settings.autoMode !== 'allow' || verdict.decision !== 'ask') return verdict
+    return { decision: 'allow' as const, reason: `${$.plugin.name}: auto mode can't review OpenRouter models; allowed unreviewed (autoMode: allow)` }
   }).catch(($, e, next) => (next.called ? next(e) : { decision: 'deny' as const, reason: 'openrouter-agents: permission check failed' }))
 
   // Deliver an auto-mode agent's report: the completion notice for a background
   // run, and the Agent tool's result for a foreground one, say no report came.
   const reportFor = (run: AgentRun) => {
-    const label = agents[run.name]?.label ?? 'OpenRouter subagent'
+    const label = agents[run.name]?.label ?? run.model
     const fellBack = run.fallbackSteps ? ` ${run.fallbackSteps} step(s) ran on the fallback model.` : ''
     return `[Report from ${label} via OpenRouter, delivered by the openrouter-agents plugin. Auto mode did not review this report or the work behind it. ${toolSummary(run.toolNames)}${fellBack}]\n\n${run.report}`
   }
@@ -199,7 +271,7 @@ export const register: Register = (on, options) => {
     const refused = r.deny !== undefined || (r.isError === true && REFUSAL.test(r.text ?? ''))
     const path = (e as unknown as Record<string, unknown>)[key]
     if (!refused || typeof path !== 'string' || !path) return r
-    if (!(await runOf($, agents, e.agentId))) return r
+    if (!(await loopRunOf($, agents, e.agentId, isOpenRouterModel(mainModel)))) return r
     const absolute = normalizePath(path, cwd, home)
     await patchRun($, e.agentId, run => (run.deniedPaths.includes(absolute) ? run : { ...run, deniedPaths: [...run.deniedPaths, absolute] }))
     return r
@@ -220,11 +292,25 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId === undefined) return yield* next(e)
-    const agentId = e.agentId
-    const run = await runOf($, agents, agentId)
+    const isSubagent = e.agentId !== undefined
+    if (!isSubagent && !isOpenRouterModel(e.model)) return yield* next(e)
+    const runKey = e.agentId ?? MAIN_RUN
+    let run = isSubagent ? await runOf($, agents, runKey) : undefined
+    // A loop that isn't one of our agents but runs on an OpenRouter model: the main
+    // session after /model, or a subagent that inherited that model
+    const isLoop = !run
+    if (isLoop) {
+      if (!isOpenRouterModel(e.model)) return yield* next(e)
+      const isAutoNow = (modeOfLoop.get(isSubagent ? runKey : '') ?? modeOfLoop.get('')) === 'auto'
+      const existing = await getRun($, runKey)
+      run = existing
+        ? { ...existing, model: e.model, ...(isSubagent ? {} : { isAuto: isAutoNow }) }
+        : newRun(isSubagent ? 'subagent' : 'main', e.model, isAutoNow, await $.clock.now())
+      await putRun($, runKey, run)
+      if (!isSubagent) mainModel = e.model
+    }
     if (!run) return yield* next(e)
-    const agent = agents[run.name]
+    const agent = isLoop ? loopAgent(e.model, visionOf.get(e.model) ?? false) : agents[run.name]
     // A run of an agent the settings no longer have (the custom slot cleared, say)
     // must not carry on on the session's own model
     if (!agent) {
@@ -236,6 +322,7 @@ export const register: Register = (on, options) => {
     const owner = run.name
     const stepKey = `${e.turnId}:${e.index}`
     const isAuto = run.isAuto
+    const agentId = runKey
     let stepCost = 0
 
     const showStatus = (what: string) =>
@@ -255,13 +342,21 @@ export const register: Register = (on, options) => {
     const key = await $.env.get('OPENROUTER_API_KEY')
     if (!key) return yield* fail('OPENROUTER_API_KEY is not set in the environment claude started from')
 
-    const messages = await $.session.messages({ agentId, as: 'api' })
+    const messages = isSubagent ? await $.session.messages({ agentId: runKey, as: 'api' }) : await $.session.messages({ as: 'api' })
     if (!Array.isArray(messages)) return yield* fail(messages.deny)
+
+    // The main session in auto mode can't have its tool calls reviewed either
+    if (!isSubagent && isAuto && settings.autoMode !== 'allow') {
+      return yield* fail(
+        `auto mode can't review ${e.model}'s tool calls (its safety check runs on Anthropic's responses). Switch to manual mode ` +
+          `or accept-edits with Shift+Tab, set the openrouter-agents option autoMode to "allow", or go back to a Claude model with /model`,
+      )
+    }
 
     // In auto mode the engine keeps asking for a SubagentHandback the classifier
     // would have to approve. The report is already kept; answer without a request.
     const lastUser = [...messages].reverse().find(m => m.role === 'user')
-    const isReminder = isAuto && run.report !== undefined && JSON.stringify(lastUser?.content ?? '').includes(HANDBACK_REMINDER)
+    const isReminder = isSubagent && isAuto && run.report !== undefined && JSON.stringify(lastUser?.content ?? '').includes(HANDBACK_REMINDER)
     // A report with no tool calls behind it gets one chance to do the work first
     const nudge = isReminder && !run.toolNames.length && !run.isNudged
     if (nudge) await patchRun($, agentId, r => ({ ...r, isNudged: true, report: undefined }))
@@ -272,12 +367,12 @@ export const register: Register = (on, options) => {
       return done(text, 'end_turn', null)
     }
 
-    const withHandback = !isAuto && engineOffersHandback(messages)
+    const withHandback = isSubagent && !isAuto && engineOffersHandback(messages)
 
     // Over the run's or the session's spend cap, the run ends here, with a report saying so
     const spentSession = settings.maxSessionUsd > 0 ? await sessionUsd($) : 0
     const capped =
-      settings.maxRunUsd > 0 && run.usd >= settings.maxRunUsd
+      isSubagent && settings.maxRunUsd > 0 && run.usd >= settings.maxRunUsd
         ? `this run reached the openrouter-agents spend cap of ${usd(settings.maxRunUsd)} per run (spent ${usd(run.usd)} over ${run.steps} steps). Raise maxRunUsd`
         : settings.maxSessionUsd > 0 && spentSession >= settings.maxSessionUsd
           ? `OpenRouter subagents reached the ${usd(settings.maxSessionUsd)} session cap (spent ${usd(spentSession)} this session). Raise maxSessionUsd`
@@ -290,21 +385,26 @@ export const register: Register = (on, options) => {
         yield { kind: 'stop' as const, stopReason: 'tool_use' as const, usage: null }
         return done('', 'tool_use', null, [{ name: HANDBACK_TOOL.name, input: { message: text } }])
       }
-      if (isAuto) await patchRun($, agentId, r => ({ ...r, report: text }))
+      if (isSubagent && isAuto) await patchRun($, agentId, r => ({ ...r, report: text }))
       yield { kind: 'text' as const, index: 0, text }
       yield { kind: 'stop' as const, stopReason: 'end_turn' as const, usage: null }
       return done(text, 'end_turn', null)
     }
 
-    const tools = toolsFor(await $.tool.list(), messages, withHandback)
-    // The Agent call's own effort, else the agent's configured one
-    const effort = run.effort ?? agent.effort
+    // The main session gets every built-in; a subagent the native subagent set
+    const tools = toolsFor(await $.tool.list(), messages, withHandback, isSubagent ? SUBAGENT_TOOLS : undefined)
+    // The Agent call's own effort, else the agent's configured one; a loop on a
+    // model of its own uses the effort the request names
+    const effort = isLoop ? e.effort : (run.effort ?? agent.effort)
+    const budget = typeof effort === 'number' ? effort : (THINKING_BUDGET[effort ?? 'medium'] ?? THINKING_BUDGET.medium!)
+    // The main session keeps Claude Code's own system prompt; a subagent the agent definition's
+    const systemText = isSubagent ? SUBAGENT_PROMPT + (isAuto ? AUTO_REPORT_RULE : '') : (composed.get(e.model) ?? MAIN_PROMPT_FALLBACK)
     const request = (a: AgentDef) => {
-      const adapted = adaptMessages(messages, a, isAuto)
+      const adapted = adaptMessages(messages, a, isSubagent && isAuto)
       return streamStep($, {
         key,
-        body: requestBody(a, nudge ? withNudge(adapted) : adapted, tools, effort, isAuto),
-        isAuto,
+        body: requestBody(a, nudge ? withNudge(adapted) : adapted, tools, budget, systemText),
+        isAuto: isSubagent && isAuto,
         signal: next.signal,
         onBlock: index => lastBlock.set(stepKey, Math.max(lastBlock.get(stepKey) ?? -1, index)),
         onRetry: why => showStatus(`retrying after ${why}`),
@@ -373,7 +473,7 @@ export const register: Register = (on, options) => {
 
     const turnUsage: TurnUsage = { ...outcome.usage, model: outcome.model }
     const stopReason = outcome.stopReason ?? (outcome.toolUses.length ? 'tool_use' : 'end_turn')
-    const report = isAuto ? (outcome.handbackReport ?? (!outcome.toolUses.length && outcome.answer.trim() ? outcome.answer.trim() : undefined)) : undefined
+    const report = isSubagent && isAuto ? (outcome.handbackReport ?? (!outcome.toolUses.length && outcome.answer.trim() ? outcome.answer.trim() : undefined)) : undefined
     const toolUses = outcome.toolUses
     await patchRun($, agentId, r => ({
       ...r,
@@ -387,11 +487,13 @@ export const register: Register = (on, options) => {
     // Without this, a failed step is finished by the engine's own model (the
     // session's Opus) without a word. For our agents, end the step with the error.
     const run = e.agentId !== undefined ? await getRun($, e.agentId) : undefined
-    if (!run || !agents[run.name]) return yield* next(e)
+    const isOurs = run !== undefined && (agents[run.name] !== undefined || isOpenRouterModel(run.model))
+    if (!isOurs && !isOpenRouterModel(e.model)) return yield* next(e)
+    const name = run?.name ?? 'main'
     const stepKey = `${e.turnId}:${e.index}`
     const index = (lastBlock.get(stepKey) ?? -1) + 1
     lastBlock.delete(stepKey)
-    const text = `[${run.name} via OpenRouter: this step failed inside the openrouter-agents plugin. Stop and report what you have.]`
+    const text = `[${name} via OpenRouter: this step failed inside the openrouter-agents plugin. Stop and report what you have.]`
     yield { kind: 'text' as const, index, text }
     yield { kind: 'stop' as const, stopReason: 'end_turn' as const, usage: null }
     return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn' as const, usage: null }
@@ -406,7 +508,7 @@ export const register: Register = (on, options) => {
       $.ui.status(undefined)
       const served = run.providers.length ? ` (served by ${run.providers.join(', ')})` : ''
       const fellBack = run.fallbackSteps ? `, ${run.fallbackSteps} on the fallback model` : ''
-      $.ui.log(`${run.name} · ${agents[run.name]?.label ?? ''} via OpenRouter${served}: ${run.steps} steps${fellBack}, ${usd(run.usd)}`)
+      $.ui.log(`${run.name} · ${agents[run.name]?.label ?? run.model} via OpenRouter${served}: ${run.steps} steps${fellBack}, ${usd(run.usd)}`)
     }
     return result
   })
@@ -430,13 +532,13 @@ export const register: Register = (on, options) => {
       $.ui.invalidate('ui.render')
     }
     const run = id !== undefined ? (await allRuns($))[id] : undefined
-    const agent = run ? agents[run.name] : undefined
-    if (!run || !agent) return next(e)
+    if (!run || !isOpenRouterModel(run.model)) return next(e)
+    const label = agents[run.name]?.label ?? run.model
     const { Box, Text } = $.ui.resolve(e)
     return (
       <Box>
         <Text dimColor>
-          {run.name} · {agent.label} ({agent.model}) via OpenRouter
+          {run.name} · {label} ({run.model}) via OpenRouter
         </Text>
       </Box>
     )
@@ -452,10 +554,10 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'InfoNotice' }, async ($, e, next) => {
     const run = viewed !== undefined ? (await allRuns($))[viewed] : undefined
-    const agent = run ? agents[run.name] : undefined
-    if (!agent || !/^Using .+ \(from /.test(e.props.text)) return next(e)
+    if (!run || !isOpenRouterModel(run.model) || !/^Using .+ \(from /.test(e.props.text)) return next(e)
+    const label = agents[run.name]?.label ?? run.model
     const { Text } = $.ui.resolve(e)
-    return <Text dimColor>Using {agent.label} ({agent.model}) via OpenRouter · this subagent</Text>
+    return <Text dimColor>Using {label} ({run.model}) via OpenRouter · this subagent</Text>
   })
 
   on('session.end', async ($, e, next) => {

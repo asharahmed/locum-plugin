@@ -12,6 +12,9 @@ export const TOP_UP = 'https://openrouter.ai/settings/credits'
 const LEDGER = 'ledger-v1'
 const OVERRIDES = 'model-overrides-v1'
 
+// How a model has done this session: steps answered, their time, and failures
+export type Health = { ok: number; ms: number; fails: number; streak: number; lastError?: string; skipUntil?: number }
+
 export const usd = (v: number) => (v === 0 ? '$0.00' : `$${v < 0.01 ? v.toFixed(4) : v.toFixed(2)}`)
 
 // Spend by local day ("2026-10-23") and agent, kept across sessions
@@ -126,6 +129,7 @@ export async function runCommand(
   runs: [string, AgentRun][],
   version: string,
   mainModel: string,
+  health: ReadonlyMap<string, Health> = new Map(),
 ): Promise<string> {
   const [sub = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
   const key = await $.env.get('OPENROUTER_API_KEY')
@@ -202,6 +206,16 @@ export async function runCommand(
     'Spend history (all sessions):',
     ...spendLines(await readLedger($), await $.clock.now()),
   ]
+  if (health.size) {
+    const now = await $.clock.now()
+    lines.push('', 'Model health this session:')
+    for (const [model, h] of health) {
+      const latency = h.ok ? ` · ${(h.ms / h.ok / 1000).toFixed(1)}s per step` : ''
+      const failing = h.fails ? ` · ${h.fails} failed step${h.fails === 1 ? '' : 's'}${h.lastError ? ` (last: ${h.lastError.slice(0, 70)})` : ''}` : ''
+      const skipping = h.skipUntil && h.skipUntil > now ? ` · skipped for ${Math.ceil((h.skipUntil - now) / 1000)}s more, steps go to the fallback` : ''
+      lines.push(`  ${model}: ${h.ok} step${h.ok === 1 ? '' : 's'}${latency}${failing}${skipping}`)
+    }
+  }
   if (runs.length) {
     lines.push('', 'Runs this session (newest first):')
     for (const [, r] of runs.slice(0, 10)) {

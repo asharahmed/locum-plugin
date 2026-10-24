@@ -2,6 +2,7 @@ import type { Register, TurnStepResult, TurnStepToolUse, TurnStopReason, TurnUsa
 import type { AgentRun } from '../types'
 import type { AgentDef } from './agents'
 import { MAIN_RUN, agentName, fallbackModelFor, isOpenRouterModel, loopAgent, readSettings } from './agents'
+import type { Health } from './commands'
 import { TOP_UP, addSpend, applyOverrides, readOverrides, runCommand, usd } from './commands'
 import { FILE_TOOLS, REFUSAL, normalizePath, refusedPathIn } from './guard'
 import {
@@ -25,6 +26,10 @@ import { allRuns, getRun, loopRunOf, newRun, patchRun, putRun, runOf, sessionUsd
 // Reasoning budget per effort level; the answer gets ANSWER_TOKENS beyond it
 const THINKING_BUDGET: Record<string, number> = { low: 1024, medium: 4000, high: 8000, xhigh: 12000, max: 16000 }
 const ANSWER_TOKENS = 12000
+// After this many failed steps in a row a model is skipped (steps go straight to
+// the fallback) for SKIP_MS, then tried again
+const SKIP_AFTER = 3
+const SKIP_MS = 120_000
 // The main session's system prompt when none was captured from Claude Code's own
 const MAIN_PROMPT_FALLBACK =
   'You are Claude Code, an interactive coding assistant working in the user\'s terminal. Use the tools available to do ' +
@@ -68,6 +73,13 @@ export const register: Register = (on, options) => {
   let mainModel = ''
   // Claude Code's own system prompt for each model, as prompt.compose rendered it
   const composed = new Map<string, string>()
+  // Each model's record this session, for skipping one that keeps failing and for /openrouter
+  const health = new Map<string, Health>()
+  const healthOf = (model: string) => {
+    let h = health.get(model)
+    if (!h) health.set(model, (h = { ok: 0, ms: 0, fails: 0, streak: 0 }))
+    return h
+  }
 
 
   // The model a failing step moves to: never the agent's own, never a Claude model
@@ -478,17 +490,44 @@ export const register: Register = (on, options) => {
     let outcome: StepOutcome
     let usedFallback = false
     const providers = new Set(run.providers)
+    // Times one request and records how its model did
+    const timed = async function* (a: AgentDef) {
+      const started = await $.clock.now()
+      const result: StepOutcome = yield* request(a)
+      const h = healthOf(a.model)
+      if (!result.failure || result.yielded) {
+        h.ok++
+        h.ms += (await $.clock.now()) - started
+        h.streak = 0
+      } else if (result.failure.kind !== 'interrupted') {
+        h.fails++
+        h.streak++
+        h.lastError = result.failure.message
+        if (h.streak >= SKIP_AFTER) h.skipUntil = (await $.clock.now()) + SKIP_MS
+      }
+      return result
+    }
     try {
-      outcome = yield* request(agent)
-      stepCost += costOf(agent.model, outcome, requestChars)
-      if (outcome.provider) providers.add(outcome.provider)
+      // A model that failed its last few steps is skipped for a while: straight to the fallback
+      const skipping = (healthOf(agent.model).skipUntil ?? 0) > (await $.clock.now())
+      const fallback = fallbackFor(agent)
+      if (skipping) {
+        showStatus(`${agent.model} is failing; using ${fallback.model}`)
+        outcome = yield* timed(fallback)
+        stepCost += costOf(fallback.model, outcome, requestChars)
+        if (outcome.provider) providers.add(outcome.provider)
+        if (!outcome.failure) usedFallback = true
+      } else {
+        outcome = yield* timed(agent)
+        stepCost += costOf(agent.model, outcome, requestChars)
+        if (outcome.provider) providers.add(outcome.provider)
+      }
       // A step its own model can't answer moves to the fallback model, once
       const first = outcome.failure
       // (not a model OpenRouter doesn't know: a typo shouldn't be hidden behind another model)
-      if (first && !outcome.yielded && (first.kind === 'retryable' || first.kind === 'other' || first.kind === 'creditCheck')) {
-        const fallback = fallbackFor(agent)
+      if (!skipping && first && !outcome.yielded && (first.kind === 'retryable' || first.kind === 'other' || first.kind === 'creditCheck')) {
         showStatus(`${agent.model} failing; trying ${fallback.model}`)
-        const second = yield* request(fallback)
+        const second = yield* timed(fallback)
         stepCost += costOf(fallback.model, second, requestChars)
         if (second.provider) providers.add(second.provider)
         if (!second.failure) {
@@ -587,7 +626,7 @@ export const register: Register = (on, options) => {
       .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
       .then(t => String((JSON.parse(String(t)) as { version?: unknown }).version ?? ''))
       .catch(() => '')
-    return { text: await runCommand($, e.args ?? '', settings, runs, version, mainModel) }
+    return { text: await runCommand($, e.args ?? '', settings, runs, version, mainModel, health) }
   })
 
   // Opening one of our agents' transcripts shows the session's model in the

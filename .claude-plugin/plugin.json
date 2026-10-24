@@ -1,6 +1,6 @@
 {
   "name": "openrouter-agents",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "Native Agent-tool subagent types (deepseek, kimi, glm) whose model requests go to OpenRouter",
   "license": "MIT",
   "userConfig": {

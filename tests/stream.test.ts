@@ -112,3 +112,26 @@ test('a credit check that never passes ends with the low-balance advice', async 
   expect(JSON.parse(requests[3]!).model).toBe('deepseek/deepseek-v4-flash-0731')
   expect(result.answer).toMatch(/couldn't confirm the balance.*top up/)
 })
+
+test('a model that keeps failing is skipped for a while, so steps go straight to the fallback', async ($, on) => {
+  const ok = sse([start(), ...text(0, 'fallback answer'), ...end('end_turn')])
+  // three steps: each fails three times on its own model, then the fallback answers
+  const replies = [RETRYABLE, RETRYABLE, RETRYABLE, ok, RETRYABLE, RETRYABLE, RETRYABLE, ok, RETRYABLE, RETRYABLE, RETRYABLE, ok, ok]
+  const requests = engine(on, replies)
+  for (const index of [0, 1, 2]) {
+    const pending = step($, index)
+    for (const ms of [1000, 2000]) {
+      await requests.clock.settle()
+      await requests.clock.advance(ms)
+    }
+    await pending
+  }
+  expect(requests.length).toBe(12)
+  // the fourth step skips the failing model: one request, to the fallback
+  const { result } = await step($, 3)
+  expect(requests.length).toBe(13)
+  expect(JSON.parse(requests[12]!).model).toBe('deepseek/deepseek-v4.1-flash-1017')
+  expect(result.answer).toBe('fallback answer')
+  const out: any = await $.command.run({ command: 'openrouter', args: '' } as never)
+  expect(String(out.text)).toMatch(/deepseek\/deepseek-v4-flash-0731: 0 steps · 3 failed steps .*skipped for \d+s more/)
+})

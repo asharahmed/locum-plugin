@@ -70,7 +70,7 @@ The spend history and `use` choices live in the plugin's own store (`$.store`), 
 | `privacy` | `zero-retention` | Which OpenRouter providers may serve these agents: `zero-retention` (providers that keep no prompts), `no-data-collection` (none that store or train on prompts) or `off`. The subagents send your files and command output to the provider. |
 | `maxRunUsd` | 0.5 | A run that has spent this much stops before its next step, with a report saying so. 0: no cap. When OpenRouter reports no cost for a reply, it's estimated from the tokens at the listed prices. |
 | `maxSessionUsd` | 3 | Once the session's OpenRouter subagents have spent this much, new ones are refused and running ones stop. 0: no cap. |
-| `fallbackModel` | `deepseek/deepseek-v4-flash-0731` | When a step's model keeps failing (outage, rate limit, provider error), the step is retried once on this model. Never a Claude model. |
+| `fallbackModel` | `deepseek/deepseek-v4-flash-0731` | When a step's model keeps failing (outage, rate limit, provider error), the step is retried once on this model. Never a Claude model. After 3 failed steps in a row a model is skipped for 2 minutes (steps go straight to the fallback), then tried again; `/openrouter` shows each model's health this session. |
 | `autoMode` | `refuse` | Whether these agents run in auto mode (see below). |
 | `lowBalanceUsd` | 5 | A notice at session start when the balance or key limit is below this. 0: off. |
 | `<agent>Model`, `<agent>Effort` | per agent | The model behind deepseek, kimi, glm and cheap, and the reasoning effort when the Agent call names none (kimi defaults to low: its output is expensive). |

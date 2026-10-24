@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.6
+
+- Model health: after 3 failed steps in a row, a model is skipped for 2 minutes, so steps go straight to the fallback instead of paying three retries each, then it's tried again.
+- `/openrouter` lists each model's health this session: steps answered, time per step, failed steps with the last error, and whether it's being skipped.
+- A test for the skip and the health listing (40 in all).
+
 ## 0.9.5
 
 Fixes from a security review of the plugin:

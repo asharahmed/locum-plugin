@@ -5,6 +5,6 @@
     <circle cx="598" cy="512" r="232" fill="#E9845A" stroke="#1E2230" stroke-width="36" paint-order="stroke"/>
   </g>
   <text x="440" y="300" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="112" font-weight="700" fill="#F2F3F6">Locum</text>
-  <text x="444" y="372" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="36" fill="#AEB6C8">Claude Code subagents on DeepSeek, Qwen,</text>
-  <text x="444" y="420" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="36" fill="#AEB6C8">GLM, Kimi and MiniMax models</text>
+  <text x="444" y="372" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="36" fill="#AEB6C8">Use DeepSeek, Qwen, Kimi and other</text>
+  <text x="444" y="420" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="36" fill="#AEB6C8">models inside Claude Code.</text>
 </svg>

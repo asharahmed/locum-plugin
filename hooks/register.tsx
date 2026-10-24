@@ -46,8 +46,8 @@ export const register: Register = (on, options) => {
   const pendingEffort = new Map<string, string>()
   // `${turnId}:${step}` -> highest content block index yielded, for the error handler
   const lastBlock = new Map<string, number>()
-  // Whether OpenRouter models take images, from the model list at session start
-  const visionOf = new Map<string, boolean>()
+  // What each OpenRouter model can do, from the model list at session start
+  const modelInfo = new Map<string, { vision: boolean; tools: boolean; reasoning: boolean }>()
   // The permission mode of each loop ('' for the main session), from the classic
   // hook events that carry it
   const modeOfLoop = new Map<string, string>()
@@ -65,13 +65,15 @@ export const register: Register = (on, options) => {
 
   // The OpenRouter request for one step
   const requestBody = (agent: AgentDef, messages: unknown[], tools: unknown[], budget: number, systemText: string) => {
+    // A model OpenRouter lists without reasoning support gets no thinking budget
+    const canReason = modelInfo.get(agent.model)?.reasoning ?? true
     const provider = { ...(agent.providers ? { order: agent.providers, allow_fallbacks: true } : {}), ...settings.privacyPrefs }
     return {
       model: agent.model,
       ...(Object.keys(provider).length ? { provider } : {}),
-      max_tokens: budget + ANSWER_TOKENS,
+      max_tokens: (canReason ? budget : 0) + ANSWER_TOKENS,
       stream: true,
-      thinking: { type: 'enabled', budget_tokens: budget },
+      ...(canReason ? { thinking: { type: 'enabled', budget_tokens: budget } } : {}),
       // Environment, date, CLAUDE.md and the rest arrive in the messages, as for a
       // native subagent; the system prompt is the agent definition's own. Tools
       // come before it in the cached prefix, so its mark covers them too. (A mark
@@ -106,9 +108,16 @@ export const register: Register = (on, options) => {
       const models = await $.http.fetch('https://openrouter.ai/api/v1/models', { headers: { authorization: `Bearer ${key}` } })
       if (models.ok) {
         const listed = new Map(
-          (JSON.parse(models.text).data as { id: string; architecture?: { input_modalities?: string[] } }[]).map(m => [m.id, m]),
+          (JSON.parse(models.text).data as { id: string; architecture?: { input_modalities?: string[] }; supported_parameters?: string[] }[]).map(m => [m.id, m]),
         )
-        for (const [id, m] of listed) visionOf.set(id, (m.architecture?.input_modalities ?? []).includes('image'))
+        for (const [id, m] of listed) {
+          const params = m.supported_parameters ?? []
+          modelInfo.set(id, {
+            vision: (m.architecture?.input_modalities ?? []).includes('image'),
+            tools: params.includes('tools'),
+            reasoning: params.includes('reasoning') || params.includes('include_reasoning'),
+          })
+        }
         const missing: string[] = []
         for (const [name, a] of Object.entries(agents)) {
           const m = listed.get(a.model)
@@ -310,7 +319,7 @@ export const register: Register = (on, options) => {
       if (!isSubagent) mainModel = e.model
     }
     if (!run) return yield* next(e)
-    const agent = isLoop ? loopAgent(e.model, visionOf.get(e.model) ?? false) : agents[run.name]
+    const agent = isLoop ? loopAgent(e.model, modelInfo.get(e.model)?.vision ?? false) : agents[run.name]
     // A run of an agent the settings no longer have (the custom slot cleared, say)
     // must not carry on on the session's own model
     if (!agent) {
@@ -341,6 +350,10 @@ export const register: Register = (on, options) => {
 
     const key = await $.env.get('OPENROUTER_API_KEY')
     if (!key) return yield* fail('OPENROUTER_API_KEY is not set in the environment claude started from')
+    // Claude Code can't work without tool calls; say so before spending anything
+    if (modelInfo.get(agent.model)?.tools === false) {
+      return yield* fail(`${agent.model} doesn't support tool calls, which Claude Code needs. Pick another model (/openrouter models lists ones that do)`)
+    }
 
     const messages = isSubagent ? await $.session.messages({ agentId: runKey, as: 'api' }) : await $.session.messages({ as: 'api' })
     if (!Array.isArray(messages)) return yield* fail(messages.deny)
@@ -421,6 +434,7 @@ export const register: Register = (on, options) => {
       if (outcome.provider) providers.add(outcome.provider)
       // A step its own model can't answer moves to the fallback model, once
       const first = outcome.failure
+      // (not a model OpenRouter doesn't know: a typo shouldn't be hidden behind another model)
       if (first && !outcome.yielded && (first.kind === 'retryable' || first.kind === 'other' || first.kind === 'creditCheck')) {
         const fallback = fallbackFor(agent)
         showStatus(`${agent.model} failing; trying ${fallback.model}`)
@@ -461,6 +475,9 @@ export const register: Register = (on, options) => {
         )
       }
       if (failure.kind === 'context') return yield* fail(`the conversation is too long for ${agent.model}`, 'model_context_window_exceeded')
+      if (failure.kind === 'unknownModel') {
+        return yield* fail(`OpenRouter doesn't know the model "${agent.model}". Check the ID with /openrouter models <name>`)
+      }
       if (failure.kind === 'credits') return yield* fail(`the OpenRouter balance is too low for this request. Top up at ${TOP_UP}`)
       if (failure.kind === 'creditCheck') {
         return yield* fail(

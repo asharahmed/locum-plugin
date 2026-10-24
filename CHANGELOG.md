@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.2
+
+- Model capabilities from OpenRouter's list (read at session start) shape each request: a model without reasoning support gets no thinking budget, and one without tool calls fails at once with a clear message, since Claude Code needs tools.
+- A model ID OpenRouter doesn't know (a typo after `/model`, say) gets "OpenRouter doesn't know the model …" instead of a raw error, and isn't hidden behind the fallback model.
+- Tests for all three (31 in all).
+
 ## 0.9.1
 
 - `/openrouter` shows the main session's model (and how to switch back when it runs on OpenRouter), the `/model` picker entry, and the model new sessions start on (`ANTHROPIC_MODEL`).

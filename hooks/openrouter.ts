@@ -18,6 +18,9 @@ const CREDITS_ERROR = /insufficient credits|requires more credits|add more credi
 // balance is low and requests arrive together, and passes on a retry, more so
 // with a smaller output cap
 const CREDIT_CHECK = /could not verify available credits/i
+// OpenRouter's answers for a model ID it doesn't know (a typo in /model, say);
+// its data-policy answer also says "No endpoints found", so that one is checked first
+const UNKNOWN_MODEL = /is not a valid model ID|model not found|No endpoints found for /i
 // The smallest output cap a credit-check retry lowers max_tokens to
 const MIN_MAX_TOKENS = 4096
 
@@ -37,7 +40,8 @@ export type Failure = {
   // too long; credits: the balance is too low; creditCheck: OpenRouter couldn't
   // confirm the balance covers the request in time, through every retry;
   // retryable: 429/5xx/network that outlasted the retries; other: anything else
-  kind: 'policy' | 'context' | 'credits' | 'creditCheck' | 'retryable' | 'other' | 'interrupted'
+  // unknownModel: OpenRouter doesn't know the model ID
+  kind: 'policy' | 'context' | 'credits' | 'creditCheck' | 'unknownModel' | 'retryable' | 'other' | 'interrupted'
   message: string
 }
 
@@ -66,6 +70,7 @@ function addUsage(into: Record<string, number>, from: Record<string, unknown> | 
 function classify(errorText: string, status: number): Failure['kind'] {
   if (CREDIT_CHECK.test(errorText)) return 'creditCheck'
   if (POLICY_ERROR.test(errorText)) return 'policy'
+  if (UNKNOWN_MODEL.test(errorText)) return 'unknownModel'
   if (CONTEXT_ERROR.test(errorText)) return 'context'
   if (CREDITS_ERROR.test(errorText) || status === 402) return 'credits'
   if (status === 0 || status === 429 || status >= 500 || (status === 200 && errorText !== '')) return 'retryable'

@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { end, engine, sse, start, text, toolUse } from './helpers'
+import { end, engine, sessionStart, sse, start, text, toolUse } from './helpers'
 
 // The main session and inherited subagents on an OpenRouter model (`/model <id>`)
 
@@ -91,4 +91,39 @@ test('a conversation on an OpenRouter model is compacted by the same model', asy
   expect(requests.length).toBe(2)
   expect(JSON.parse(requests[1]!).model).toBe(LUNA)
   expect(compacted.messages[0].text).toMatch(/building a parser; tests pass/)
+})
+
+const CAPS = [
+  { id: 'plain/no-reasoning', supported_parameters: ['tools'], architecture: { input_modalities: ['text'] } },
+  { id: 'plain/no-tools', supported_parameters: ['reasoning'], architecture: { input_modalities: ['text'] } },
+]
+
+async function withModels($: any, on: any, requests: any) {
+  sessionStart(on, CAPS)
+  await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false } as never)
+  await requests.clock.settle()
+}
+
+test('a model listed without reasoning support gets no thinking budget', async ($, on) => {
+  const requests = engine(on, [sse([start(), ...text(0, 'ok'), ...end('end_turn')])])
+  await withModels($, on, requests)
+  await mainStep($, 'plain/no-reasoning')
+  const body = JSON.parse(requests[0]!)
+  expect(body.thinking).toBeUndefined()
+  expect(body.max_tokens).toBe(12000)
+})
+
+test('a model listed without tool support fails clearly before any request', async ($, on) => {
+  const requests = engine(on, [sse([start(), ...text(0, 'ok'), ...end('end_turn')])])
+  await withModels($, on, requests)
+  const { result } = await mainStep($, 'plain/no-tools')
+  expect(requests.length).toBe(0)
+  expect(result.answer).toMatch(/doesn't support tool calls/)
+})
+
+test('a model ID OpenRouter doesn\'t know gets a clear message and no fallback', async ($, on) => {
+  const requests = engine(on, ['{"error":{"message":"typo/model is not a valid model ID"}}\n__STATUS__400\n'])
+  const { result } = await mainStep($, 'typo/model')
+  expect(requests.length).toBe(1)
+  expect(result.answer).toMatch(/doesn't know the model "typo\/model"/)
 })

@@ -12,6 +12,13 @@ root=$(pwd)
 
 types=${1:-$(ls -t /private/tmp/claude-*/bundled-skills/*/*/plugin-authoring/types/claude-code.d.ts 2>/dev/null | head -1 || true)}
 
+echo "== release badge"
+# The README's release badge is static (a private repo's releases aren't visible
+# to shields.io), so it must name the manifest's version
+version=$(python3 -c 'import json; print(json.load(open(".claude-plugin/plugin.json"))["version"])')
+grep -q "badge/release-v$version-" README.md || { echo "README release badge doesn't say v$version"; exit 1; }
+echo "v$version"
+
 echo "== validate"
 claude plugin validate . 2>&1 | grep -E '✔|✘|❯ .*(error|refus)' || true
 claude plugin validate . > /dev/null 2>&1 || { echo "validation failed"; exit 1; }

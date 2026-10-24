@@ -5,7 +5,7 @@
 <h1 align="center">Locum</h1>
 
 <p align="center">
-  Claude Code subagents, and the main session, on DeepSeek, Qwen, GLM, Kimi and MiniMax models.
+  Use DeepSeek, Qwen, Kimi and other models inside Claude Code.
 </p>
 
 <p align="center">

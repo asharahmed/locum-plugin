@@ -6,8 +6,8 @@
     "name": "Ashar Ahmed",
     "url": "https://github.com/asharahmed"
   },
-  "homepage": "https://github.com/asharahmed/claude-locum",
-  "repository": "https://github.com/asharahmed/claude-locum",
+  "homepage": "https://github.com/asharahmed/locum-plugin",
+  "repository": "https://github.com/asharahmed/locum-plugin",
   "license": "MIT",
   "keywords": [
     "subagents",

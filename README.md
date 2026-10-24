@@ -9,13 +9,15 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/asharahmed/claude-locum/actions/workflows/check.yml"><img src="https://github.com/asharahmed/claude-locum/actions/workflows/check.yml/badge.svg" alt="check"></a>
-  <a href="https://github.com/asharahmed/claude-locum/releases/latest"><img src="https://img.shields.io/badge/release-v1.1.3-2f6feb" alt="release v1.1.3"></a>
+  <a href="https://github.com/asharahmed/locum-plugin/actions/workflows/check.yml"><img src="https://github.com/asharahmed/locum-plugin/actions/workflows/check.yml/badge.svg" alt="check"></a>
+  <a href="https://github.com/asharahmed/locum-plugin/releases/latest"><img src="https://img.shields.io/badge/release-v1.1.3-2f6feb" alt="release v1.1.3"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2f6feb" alt="license MIT"></a>
   <a href="https://code.claude.com"><img src="https://img.shields.io/badge/Claude_Code-2.1.309%2B-d97757" alt="Claude Code 2.1.309+"></a>
 </p>
 
 A *locum tenens* is a doctor who covers for another, in the same practice, with the same patients and records. Locum does that for Claude in Claude Code. Its agents are native subagents: they use Claude Code's tools, permission rules, transcripts and subagent view. The only difference is the model, reached through [OpenRouter](https://openrouter.ai) or the lab's own API.
+
+Locum is an independent project, not made or endorsed by Anthropic, and Anthropic doesn't support Claude Code on other models. Read [DISCLAIMER.md](DISCLAIMER.md) before using it: it explains where to report problems and what Locum sends to other providers.
 
 Your Claude login and model stay the default. Hand work to a Locum agent when you want a cheaper model or a second opinion from another model family. You can also move the whole session to another model for a while.
 
@@ -45,7 +47,7 @@ Your Claude login and model stay the default. Hand work to a Locum agent when yo
 1. Add the marketplace and install the plugin:
 
    ```sh
-   claude plugin marketplace add asharahmed/claude-locum
+   claude plugin marketplace add asharahmed/locum-plugin
    claude plugin install locum@asharahmed --scope user
    ```
 
@@ -253,9 +255,11 @@ scripts/
   release.sh          bump, check, push, wait for CI, tag and publish
   live-regression.sh  14 scenarios against the real APIs, a few cents a run
   gen-schemas.py      regenerate schemas.ts after a Claude Code update
+  tool-descriptions.json  Locum's own wording for every tool parameter
 assets/          icon and social preview sources
 ```
 
+- `hooks/schemas.ts` takes only the tool schemas' structure from Claude Code's type file. Every parameter description in it is Locum's own, from `scripts/tool-descriptions.json`, and the generator lists any new parameter that needs one.
 - `scripts/check.sh` exits non-zero on any failure. GitHub Actions runs it on every push and pull request, without the type-check, because Claude Code's plugin type file isn't published.
 - Run `scripts/live-regression.sh` before a release. It reruns the code the agents wrote and checks that no step went to Anthropic.
 - To release, write the code and a `## x.y.z` section in `CHANGELOG.md`, commit everything except the CHANGELOG, then run `scripts/release.sh x.y.z`. It bumps the version and badge, runs the checks, pushes, waits for CI on that commit, and only then tags and publishes. `--dry-run` runs the checks and changes nothing.
@@ -265,4 +269,4 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Report security issues as described in [SECURITY.md](SECURITY.md).
+MIT. See [LICENSE](LICENSE). Report security issues as described in [SECURITY.md](SECURITY.md). Locum isn't affiliated with Anthropic; see [DISCLAIMER.md](DISCLAIMER.md).

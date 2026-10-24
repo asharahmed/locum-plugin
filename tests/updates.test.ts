@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { install, isNewer } from '../hooks/updates'
 import { MODELS, sessionStart } from './helpers'
 
-const RELEASE = { tag_name: 'v9.9.10', body: '- Routes by price\n- Updates', html_url: 'https://github.com/asharahmed/claude-locum/releases/tag/v9.9.10' }
+const RELEASE = { tag_name: 'v9.9.10', body: '- Routes by price\n- Updates', html_url: 'https://github.com/asharahmed/locum-plugin/releases/tag/v9.9.10' }
 
 // A session start with Locum 9.9.9 installed, keeping the notices it shows
 function setup(on: any, release: object | undefined = RELEASE) {

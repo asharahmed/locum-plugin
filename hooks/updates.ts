@@ -4,7 +4,7 @@
 
 import type { EngineInterface } from 'claude-code'
 
-export const REPO = 'asharahmed/claude-locum'
+export const REPO = 'asharahmed/locum-plugin'
 export const MARKETPLACE = 'asharahmed'
 export const PLUGIN_ID = 'locum@asharahmed'
 const LATEST = `https://api.github.com/repos/${REPO}/releases/latest`

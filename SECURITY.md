@@ -2,7 +2,7 @@
 
 Locum runs model output as tool calls in your Claude Code session, sends your files and command output to the model's provider, and holds API keys. Reports about any of that are welcome.
 
-Please report a vulnerability privately, through GitHub's [private vulnerability reporting](https://github.com/asharahmed/claude-locum/security/advisories/new), not in a public issue. Include the Locum and Claude Code versions and the steps to reproduce. You'll get a reply within a week.
+Please report a vulnerability privately, through GitHub's [private vulnerability reporting](https://github.com/asharahmed/locum-plugin/security/advisories/new), not in a public issue. Include the Locum and Claude Code versions and the steps to reproduce. You'll get a reply within a week.
 
 What's in scope, and how Locum handles each, is in the README's Safety and Auto mode sections. In short:
 

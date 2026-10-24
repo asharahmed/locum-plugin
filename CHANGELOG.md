@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.4
+
+- `scripts/check.sh`: validation, a type-check against the installed Claude Code's plugin API, and the tests in one command, exiting non-zero on any failure (checked against a planted type error).
+
 ## 0.9.3
 
 - Fix: compacting a resumed session on an OpenRouter model (`/compact` before any step) went to Anthropic and failed, because the plugin only knew the main model once a step had named it. It now asks Claude Code for the session's model.

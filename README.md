@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/asharahmed/claude-locum/actions/workflows/check.yml"><img src="https://github.com/asharahmed/claude-locum/actions/workflows/check.yml/badge.svg" alt="check"></a>
-  <a href="https://github.com/asharahmed/claude-locum/releases/latest"><img src="https://img.shields.io/badge/release-v1.1.2-2f6feb" alt="release v1.1.2"></a>
+  <a href="https://github.com/asharahmed/claude-locum/releases/latest"><img src="https://img.shields.io/badge/release-v1.1.3-2f6feb" alt="release v1.1.3"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2f6feb" alt="license MIT"></a>
   <a href="https://code.claude.com"><img src="https://img.shields.io/badge/Claude_Code-2.1.309%2B-d97757" alt="Claude Code 2.1.309+"></a>
 </p>

@@ -2,6 +2,18 @@
 
 Locum was called openrouter-agents until 1.0.1.
 
+## 1.1.3
+
+- Routing by price. With a lab's key set, each step goes first to whichever route costs less at that moment, the lab's own API or OpenRouter, and the other is the backup. Prices come from OpenRouter's public lists at session start: the providers that meet the privacy setting (OpenRouter's zero-retention list under `zero-retention` and `no-data-collection`), and the lab's own listing for its price. The comparison uses a typical step (mostly cached input), adds OpenRouter's 5.5% credit fee, and counts DeepSeek's peak hours.
+- On 24 October 2026 that put deepseek, minimax and glm on OpenRouter first (DeepInfra, Relace and Wafer were cheaper than the labs) and qwen on Alibaba. 1.1.1 and 1.1.2 sent a step to the lab whenever it had a key, which cost more for those three.
+- `direct` is now `cheapest` (default), `always` (the lab first whenever it has a key, for a flat-price plan such as GLM's Coding Plan) or `off`.
+- Direct prices are the lab's listing on OpenRouter, with the table in `providers.ts` as the fallback when it's missing.
+- Compaction takes the same routes as a step, so a session on a lab's model compacts without an OpenRouter key.
+- `/locum` shows each agent's two routes with their prices and which goes first, and health per route (`… via OpenRouter`, `… via DeepSeek`).
+- Updates. Locum checks GitHub's latest release twice a day and shows one notice per new version. `/locum update` shows the release notes; `/locum update install` runs `claude plugin marketplace update asharahmed` and `claude plugin update locum@asharahmed`, and only when the person typed it (at the terminal or through Remote Control), never when the model or a plugin runs the command. The new `updates` option is `notify` (default), `auto` (install at session start; choosing it grants that) or `off`. A copy read from a folder is never changed. The check needs the repository to be public.
+- `scripts/release.sh x.y.z`: bumps the version and README badge, runs `scripts/check.sh`, pushes, waits for CI on that commit, then tags and publishes the release with its CHANGELOG section. A failing check or CI stops it before the tag. `--dry-run` changes nothing.
+- 73 tests (prices and route choice, the backup route, `always`, compaction through a lab, update notices, the install's origin check and commands). The live suite adds a scenario that loads real prices.
+
 ## 1.1.2
 
 - The marketplace is now `asharahmed` (it was `ashar-local`), so the plugin installs as `locum@asharahmed`. The plugin name, agent types and `/locum` are unchanged.

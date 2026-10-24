@@ -15,8 +15,6 @@
   <a href="https://code.claude.com"><img src="https://img.shields.io/badge/Claude_Code-2.1.309%2B-d97757" alt="Claude Code 2.1.309+"></a>
 </p>
 
----
-
 A *locum tenens* is a doctor who covers for another, in the same practice, with the same patients and records. Locum does that for Claude in Claude Code. Its agents are native subagents: they use Claude Code's tools, permission rules, transcripts and subagent view. The only difference is the model, reached through [OpenRouter](https://openrouter.ai) or the lab's own API.
 
 Your Claude login and model stay the default. Hand work to a Locum agent when you want a cheaper model or a second opinion from another model family. You can also move the whole session to another model for a while.

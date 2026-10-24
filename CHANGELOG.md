@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.7
+
+- Tests for what the model is sent and the auto-mode report handling (49 in all): an image for a text-only model and one that reads images, ToolSearch results (a loadable built-in and an unusable MCP tool), the model-identity rewrite, SubagentHandback offered only when Claude Code offers it, an auto-mode handback call becoming the report, reminders answered locally after one no-tools nudge, a mode change seen at the next tool call, and the Agent call's effort reaching the reasoning budget.
+- Removing the effort handover or the nudge makes its test fail.
+- README: development notes list the test files.
+
 ## 0.9.6
 
 - Model health: after 3 failed steps in a row, a model is skipped for 2 minutes, so steps go straight to the fallback instead of paying three retries each, then it's tried again.

@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/asharahmed/claude-locum/actions/workflows/check.yml"><img src="https://github.com/asharahmed/claude-locum/actions/workflows/check.yml/badge.svg" alt="check"></a>
-  <a href="https://github.com/asharahmed/claude-locum/releases/latest"><img src="https://img.shields.io/badge/release-v1.1.1-2f6feb" alt="release v1.1.1"></a>
+  <a href="https://github.com/asharahmed/claude-locum/releases/latest"><img src="https://img.shields.io/badge/release-v1.1.2-2f6feb" alt="release v1.1.2"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2f6feb" alt="license MIT"></a>
   <a href="https://code.claude.com"><img src="https://img.shields.io/badge/Claude_Code-2.1.309%2B-d97757" alt="Claude Code 2.1.309+"></a>
 </p>
@@ -45,7 +45,7 @@ Your Claude login and model stay the default. Hand work to a Locum agent when yo
 
    ```sh
    claude plugin marketplace add asharahmed/claude-locum
-   claude plugin install locum@ashar-local --scope user
+   claude plugin install locum@asharahmed --scope user
    ```
 
 2. Claude Code opens the plugin's settings. Paste an [OpenRouter API key](https://openrouter.ai/settings/keys) with a few dollars of credit into the first field and leave the rest as they are. Claude Code keeps the key in your system keychain.
@@ -56,7 +56,7 @@ Your Claude login and model stay the default. Hand work to a Locum agent when yo
    > have the deepseek agent write tests for parser.py
    ```
 
-Run `/locum setup` to see which keys are set, and `/locum` for your balance, agents and spend. To change a key later, run `/plugin configure locum@ashar-local`.
+Run `/locum setup` to see which keys are set, and `/locum` for your balance, agents and spend. To change a key later, run `/plugin configure locum@asharahmed`.
 
 ## Agents
 
@@ -119,7 +119,7 @@ In a switched session, Claude Code may run its built-in subagents (general-purpo
 
 An OpenRouter key runs every agent. OpenRouter charges each lab's own per-token price and adds a 5.5% fee when you buy credit.
 
-A lab's own key sends that lab's models straight to it, with OpenRouter as the backup. Each key has a field in `/plugin configure locum@ashar-local`, and nothing else needs setting.
+A lab's own key sends that lab's models straight to it, with OpenRouter as the backup. Each key has a field in `/plugin configure locum@asharahmed`, and nothing else needs setting.
 
 | Key | Models | Is it worth adding? |
 | --- | --- | --- |
@@ -140,12 +140,12 @@ Keys can also come from the environment for any field left empty: `OPENROUTER_AP
 
 ```sh
 read -rs K && printf '{"deepseekApiKey":"%s"}' "$K" \
-  | claude plugin configure locum@ashar-local --values-stdin; unset K
+  | claude plugin configure locum@asharahmed --values-stdin; unset K
 ```
 
 ## Settings
 
-Open them with `/plugin configure locum@ashar-local`.
+Open them with `/plugin configure locum@asharahmed`.
 
 | Option | Default | Effect |
 | --- | --- | --- |
@@ -205,7 +205,7 @@ The permission mode is read from Claude Code's hook events. After Shift+Tab mid-
 | --- | --- | --- |
 | `Agent type 'locum:…' not found` | The session loaded Locum before that agent existed. | Run `/reload-plugins`. |
 | `no OpenRouter key` | No key is set in the plugin settings or the environment. | Run `/locum setup`. |
-| `… refused its API key` | A lab rejected the key you entered for it. | Correct it in `/plugin configure locum@ashar-local`. |
+| `… refused its API key` | A lab rejected the key you entered for it. | Correct it in `/plugin configure locum@asharahmed`. |
 | `… can't run in auto mode` | `autoMode` is `refuse`. | Switch to manual or accept-edits with Shift+Tab, or set `autoMode` to `allow`. |
 | `the OpenRouter balance is too low` | The balance can't cover the request, or several requests arrived together. | [Top up](https://openrouter.ai/settings/credits), or run fewer agents at once. |
 | `no OpenRouter provider of … meets the privacy setting` | No provider of that model qualifies under `privacy`. | Choose another model with `/locum models`, add the lab's key, or loosen `privacy`. |
@@ -238,8 +238,8 @@ assets/          icon and social preview sources
 
 - `scripts/check.sh` exits non-zero on any failure. GitHub Actions runs it on every push and pull request, without the type-check, because Claude Code's plugin type file isn't published.
 - Run `scripts/live-regression.sh` before a release. It reruns the code the agents wrote and checks that no step went to Anthropic.
-- To update, run `claude plugin marketplace update ashar-local`, then `/reload-plugins`.
-- To turn Locum off, run `claude plugin disable locum@ashar-local`. To remove it, run `claude plugin uninstall locum@ashar-local`.
+- To update, run `claude plugin marketplace update asharahmed`, then `/reload-plugins`.
+- To turn Locum off, run `claude plugin disable locum@asharahmed`. To remove it, run `claude plugin uninstall locum@asharahmed`.
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 

@@ -2,6 +2,13 @@
 
 Locum was called openrouter-agents until 1.0.1.
 
+## 1.1.2
+
+- The marketplace is now `asharahmed` (it was `ashar-local`), so the plugin installs as `locum@asharahmed`. The plugin name, agent types and `/locum` are unchanged.
+- To move an existing install: `claude plugin uninstall locum@ashar-local`, `claude plugin marketplace remove ashar-local`, `claude plugin marketplace add asharahmed/claude-locum`, `claude plugin install locum@asharahmed`. Uninstalling clears the plugin's options, keys included, so note any you set first. The spend history lives in `~/.claude/plugins/store/locum_ashar-local-*.json` and can be copied into the new `locum_asharahmed-*.json`.
+- README rewritten: centred header with icon and badges, contents, shorter tables, long details folded away. The release badge is static, and `scripts/check.sh` fails if it doesn't match the manifest's version.
+- Icon, MIT license file, security policy, author and repository metadata, and a GitHub Actions check on every push.
+
 ## 1.1.1
 
 Setup made as short as it can be: install, paste one key, done.

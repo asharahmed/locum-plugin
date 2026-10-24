@@ -137,7 +137,7 @@ export function setupText(openRouter: boolean, labKeys: Readonly<Record<string, 
     '',
     `To add or change a key: ${CONFIGURE}, paste it into its field (it's kept in your keychain), then /reload-plugins.`,
     'From a terminal instead, without the key landing in your shell history:',
-    `  read -rs K && printf '{"deepseekApiKey":"%s"}' "$K" | claude plugin configure locum@ashar-local --values-stdin; unset K`,
+    `  read -rs K && printf '{"deepseekApiKey":"%s"}' "$K" | claude plugin configure locum@asharahmed --values-stdin; unset K`,
     '  (openrouterApiKey, dashscopeApiKey, minimaxApiKey and zaiApiKey work the same way)',
     'Keys in the environment work too: OPENROUTER_API_KEY, DEEPSEEK_API_KEY, DASHSCOPE_API_KEY, MINIMAX_API_KEY, ZAI_API_KEY.',
   ].join('\n')
@@ -215,7 +215,7 @@ export async function runCommand(
   }
   const overrides = await readOverrides($)
   const lines = [
-    `Locum${version ? ` ${version}` : ''}: Claude Code agents on OpenRouter models`,
+    `Locum${version ? ` ${version}` : ''}: Claude Code agents on other labs' models`,
     money,
     `This session: ${runs.length} run${runs.length === 1 ? '' : 's'}, ${usd(spent)} spent. Caps: ${settings.maxRunUsd > 0 ? usd(settings.maxRunUsd) : 'none'} per run, ${settings.maxSessionUsd > 0 ? usd(settings.maxSessionUsd) : 'none'} per session.`,
     `Settings: privacy ${settings.privacy}, auto mode ${settings.autoMode}, fallback model ${settings.fallbackModel}.`,
@@ -257,6 +257,6 @@ export async function runCommand(
     }
     if (runs.length > 10) lines.push(`  …and ${runs.length - 10} earlier`)
   }
-  lines.push('', '/locum help lists the subcommands. Settings: /plugin configure locum@ashar-local.')
+  lines.push('', '/locum help lists the subcommands. Settings: /plugin configure locum@asharahmed.')
   return lines.join('\n')
 }

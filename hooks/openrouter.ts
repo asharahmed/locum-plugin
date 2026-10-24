@@ -259,7 +259,7 @@ export async function* streamStep($: EngineInterface, req: StepRequest) {
 
 // OpenRouter's account balance and this key's remaining limit; undefined where unknown
 // Where a key is entered: the plugin's config dialog, which keeps it in the keychain
-export const CONFIGURE = '/plugin configure locum@ashar-local'
+export const CONFIGURE = '/plugin configure locum@asharahmed'
 export const NO_KEY = `no OpenRouter key: add one in ${CONFIGURE} (or set OPENROUTER_API_KEY)`
 
 // The OpenRouter key: the one entered in the config dialog, else the environment's

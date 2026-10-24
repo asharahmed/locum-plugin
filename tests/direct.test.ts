@@ -117,7 +117,7 @@ test('with no key at all, a step says where to add one and sends nothing', async
   await begin($)
   const { result } = await step($)
   expect(requests.length).toBe(0)
-  expect(result.answer).toMatch(/plugin configure locum@ashar-local/)
+  expect(result.answer).toMatch(/plugin configure locum@asharahmed/)
 })
 
 test('DeepSeek doubles its price at peak hours, and a workspace URL replaces Alibaba\'s default', async () => {

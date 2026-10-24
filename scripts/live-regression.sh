@@ -43,11 +43,11 @@ check() {
 }
 
 none='{}'
-allow='{"pluginConfigs":{"locum@ashar-local":{"options":{"autoMode":"allow"}}}}'
-refuse='{"pluginConfigs":{"locum@ashar-local":{"options":{"autoMode":"refuse"}}}}'
-capped='{"pluginConfigs":{"locum@ashar-local":{"options":{"maxRunUsd":0.00001}}}}'
+allow='{"pluginConfigs":{"locum@asharahmed":{"options":{"autoMode":"allow"}}}}'
+refuse='{"pluginConfigs":{"locum@asharahmed":{"options":{"autoMode":"refuse"}}}}'
+capped='{"pluginConfigs":{"locum@asharahmed":{"options":{"maxRunUsd":0.00001}}}}'
 direct="$none"
-noZdr='{"pluginConfigs":{"locum@ashar-local":{"options":{"customModel":"qwen/qwen3.7-flash"}}}}'
+noZdr='{"pluginConfigs":{"locum@asharahmed":{"options":{"customModel":"qwen/qwen3.7-flash"}}}}'
 
 task() { echo "Use the Agent tool with subagent_type \"locum:$1\" and prompt \"In $work/$1 write calc.py with add(a, b) and mul(a, b) and asserts for both in a __main__ block that print ok, run it with python3, fix any failure, and report the output.\" Then reply with its report."; }
 
